@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extrator de Imóveis SP</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>🏢 Extrator de Imóveis SP</h1>
+    
+    <div class="input-section">
+      <label for="endereco">Endereço Completo:</label>
+      <input 
+        type="text" 
+        id="endereco" 
+        placeholder="Ex: Avenida Paulista, 1578"
+        autocomplete="off"
+      >
+      <small>Digite a rua e número em São Paulo/SP</small>
+      <button id="buscar">Buscar Dados</button>
+    </div>
+
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <p>Buscando informações...</p>
+    </div>
+
+    <div id="erro" class="erro hidden"></div>
+
+    <div id="resultados" class="resultados hidden">
+      
+      <!-- GeoSampa / Dados Prefeitura -->
+      <div class="card">
+        <h2>📍 Localização e Cadastro</h2>
+        <div id="dados-localizacao">
+          <p><strong>Endereço Completo:</strong> <span id="endereco-completo">-</span></p>
+          <p><strong>CEP:</strong> <span id="cep">-</span></p>
+          <p><strong>Distrito:</strong> <span id="distrito">-</span></p>
+          <p><strong>Subprefeitura:</strong> <span id="subprefeitura">-</span></p>
+          <p><strong>SQL (Setor/Quadra/Lote):</strong> <span id="sql">-</span></p>
+        </div>
+      </div>
+
+      <!-- IPTU -->
+      <div class="card">
+        <h2>💰 Dados IPTU</h2>
+        <div id="dados-iptu">
+          <p><strong>Valor Venal:</strong> <span id="valor-venal">-</span></p>
+          <p><strong>Área do Terreno:</strong> <span id="area-terreno">-</span></p>
+          <p><strong>Área Construída:</strong> <span id="area-construida">-</span></p>
+          <p><strong>Ano de Construção:</strong> <span id="ano-construcao">-</span></p>
+          <p><strong>Tipo de Uso:</strong> <span id="tipo-uso">-</span></p>
+        </div>
+      </div>
+
+      <!-- Zoneamento -->
+      <div class="card">
+        <h2>🗺️ Zoneamento</h2>
+        <div id="dados-zoneamento">
+          <p><strong>Zona:</strong> <span id="zona">-</span></p>
+          <p><strong>Coeficiente de Aproveitamento:</strong> <span id="coef-aprov">-</span></p>
+          <p><strong>Gabarito de Altura:</strong> <span id="gabarito">-</span></p>
+        </div>
+      </div>
+
+      <!-- Dados Imobiliários -->
+      <div class="card">
+        <h2>🏠 Mercado Imobiliário</h2>
+        <div id="dados-mercado">
+          <p><strong>Valor Estimado (m²):</strong> <span id="valor-m2">-</span></p>
+          <p><strong>Imóveis à Venda (região):</strong> <span id="imoveis-venda">-</span></p>
+          <p><strong>Preço Médio (região):</strong> <span id="preco-medio">-</span></p>
+        </div>
+      </div>
+
+      <!-- Infraestrutura -->
+      <div class="card">
+        <h2>🚇 Infraestrutura</h2>
+        <div id="dados-infraestrutura">
+          <p><strong>Estação de Metrô mais próxima:</strong> <span id="metro-proximo">-</span></p>
+          <p><strong>Distância:</strong> <span id="metro-distancia">-</span></p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      <small>Dados agregados de múltiplas fontes públicas</small>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

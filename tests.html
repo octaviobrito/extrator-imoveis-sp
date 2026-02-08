@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Testes - Extrator de Imóveis SP</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: #f5f7fa; }
+    h1 { color: #1a202c; border-bottom: 2px solid #4299e1; padding-bottom: 10px; }
+    .test-pass { color: #38a169; margin: 4px 0; }
+    .test-fail { color: #e53e3e; margin: 4px 0; font-weight: bold; }
+    .summary { margin-top: 20px; padding: 15px; border-radius: 8px; font-size: 18px; font-weight: 600; }
+    .summary-pass { background: #c6f6d5; color: #22543d; }
+    .summary-fail { background: #fed7d7; color: #742a2a; }
+    .section { background: white; padding: 15px; margin: 15px 0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .section h2 { font-size: 16px; margin-bottom: 10px; color: #2d3748; }
+  </style>
+</head>
+<body>
+  <h1>Testes - Extrator de Imoveis SP</h1>
+  <div id="results"></div>
+
+  <!-- DOM elements required by popup.js -->
+  <div style="display:none">
+    <input type="text" id="endereco">
+    <button id="buscar"></button>
+    <div id="loading" class="hidden"></div>
+    <div id="erro" class="hidden"></div>
+    <div id="resultados" class="hidden">
+      <span id="endereco-completo">-</span>
+      <span id="cep">-</span>
+      <span id="distrito">-</span>
+      <span id="subprefeitura">-</span>
+      <span id="sql">-</span>
+      <span id="valor-venal">-</span>
+      <span id="area-terreno">-</span>
+      <span id="area-construida">-</span>
+      <span id="ano-construcao">-</span>
+      <span id="tipo-uso">-</span>
+      <span id="zona">-</span>
+      <span id="coef-aprov">-</span>
+      <span id="gabarito">-</span>
+      <span id="valor-m2">-</span>
+      <span id="imoveis-venda">-</span>
+      <span id="preco-medio">-</span>
+      <span id="metro-proximo">-</span>
+      <span id="metro-distancia">-</span>
+    </div>
+  </div>
+
+  <script src="imoveis_sp_popup_js.js"></script>
+  <script>
+    // ===== Mini test framework =====
+    let passed = 0;
+    let failed = 0;
+    const resultsDiv = document.getElementById('results');
+    let currentSection = null;
+
+    function section(name) {
+      currentSection = document.createElement('div');
+      currentSection.className = 'section';
+      currentSection.innerHTML = `<h2>${name}</h2>`;
+      resultsDiv.appendChild(currentSection);
+    }
+
+    function assert(description, condition) {
+      const p = document.createElement('p');
+      if (condition) {
+        p.className = 'test-pass';
+        p.textContent = `PASS: ${description}`;
+        passed++;
+      } else {
+        p.className = 'test-fail';
+        p.textContent = `FAIL: ${description}`;
+        failed++;
+      }
+      (currentSection || resultsDiv).appendChild(p);
+    }
+
+    function assertEqual(description, actual, expected) {
+      const pass = actual === expected;
+      const p = document.createElement('p');
+      if (pass) {
+        p.className = 'test-pass';
+        p.textContent = `PASS: ${description}`;
+        passed++;
+      } else {
+        p.className = 'test-fail';
+        p.textContent = `FAIL: ${description} (esperado: ${expected}, recebido: ${actual})`;
+        failed++;
+      }
+      (currentSection || resultsDiv).appendChild(p);
+    }
+
+    function assertApprox(description, actual, expected, tolerance) {
+      const pass = Math.abs(actual - expected) <= tolerance;
+      const p = document.createElement('p');
+      if (pass) {
+        p.className = 'test-pass';
+        p.textContent = `PASS: ${description}`;
+        passed++;
+      } else {
+        p.className = 'test-fail';
+        p.textContent = `FAIL: ${description} (esperado: ~${expected}, recebido: ${actual})`;
+        failed++;
+      }
+      (currentSection || resultsDiv).appendChild(p);
+    }
+
+    function showSummary() {
+      const total = passed + failed;
+      const div = document.createElement('div');
+      div.className = `summary ${failed === 0 ? 'summary-pass' : 'summary-fail'}`;
+      div.textContent = `Resultado: ${passed}/${total} testes passaram` + (failed > 0 ? ` (${failed} falharam)` : '');
+      resultsDiv.appendChild(div);
+    }
+
+    // ===== Tests =====
+
+    // --- calcularDistancia (Haversine) ---
+    section('calcularDistancia - Haversine');
+
+    // Same point should return 0
+    assertApprox(
+      'Mesma coordenada retorna distancia 0',
+      calcularDistancia(-23.5505, -46.6333, -23.5505, -46.6333),
+      0, 0.01
+    );
+
+    // Av. Paulista to Se Cathedral (~2.4 km)
+    assertApprox(
+      'Av. Paulista ate Se (~2400m)',
+      calcularDistancia(-23.5613, -46.6558, -23.5503, -46.6340),
+      2400, 300
+    );
+
+    // SP to RJ (~357 km)
+    assertApprox(
+      'Sao Paulo ate Rio de Janeiro (~357km)',
+      calcularDistancia(-23.5505, -46.6333, -22.9068, -43.1729),
+      357000, 5000
+    );
+
+    // Should be symmetric
+    const d1 = calcularDistancia(-23.5505, -46.6333, -22.9068, -43.1729);
+    const d2 = calcularDistancia(-22.9068, -43.1729, -23.5505, -46.6333);
+    assertApprox('Distancia e simetrica (A->B == B->A)', d1, d2, 0.01);
+
+    // Very short distance (~111m for 0.001 degree lat at equator)
+    assertApprox(
+      'Distancia curta (~111m para 0.001 grau lat no equador)',
+      calcularDistancia(0, 0, 0.001, 0),
+      111, 2
+    );
+
+    // --- UI functions ---
+    section('Funcoes de UI');
+
+    // mostrarLoading
+    mostrarLoading();
+    assert('mostrarLoading remove classe hidden do loading', !loadingDiv.classList.contains('hidden'));
+    assert('mostrarLoading adiciona classe hidden ao erro', erroDiv.classList.contains('hidden'));
+    assert('mostrarLoading adiciona classe hidden aos resultados', resultadosDiv.classList.contains('hidden'));
+
+    // esconderLoading
+    esconderLoading();
+    assert('esconderLoading adiciona classe hidden ao loading', loadingDiv.classList.contains('hidden'));
+
+    // mostrarErro
+    mostrarErro('Erro de teste');
+    assertEqual('mostrarErro define o texto da mensagem', erroDiv.textContent, 'Erro de teste');
+    assert('mostrarErro remove classe hidden do erro', !erroDiv.classList.contains('hidden'));
+
+    // limparResultados
+    limparResultados();
+    assert('limparResultados adiciona classe hidden aos resultados', resultadosDiv.classList.contains('hidden'));
+
+    // --- exibirResultados ---
+    section('exibirResultados');
+
+    const dadosTeste = {
+      coordenadas: { lat: -23.5613, lon: -46.6558, display_name: 'Av. Paulista, SP' },
+      geoSampa: { sql: 'SQL-123', distrito: 'Bela Vista', subprefeitura: 'Se', cep: '01310-100' },
+      iptu: { valorVenal: 'R$ 500.000', areaTerreno: '250 m2', areaConstruida: '180 m2', anoConstrucao: '1990', tipoUso: 'Residencial' },
+      zoneamento: { zona: 'ZM', coefAprov: '2.0', gabarito: '15m' },
+      mercado: { valorM2: 'R$ 10.000', imoveisVenda: '150', precoMedio: 'R$ 800.000' },
+      infraestrutura: { metroProximo: 'Trianon-Masp', metroDistancia: '200 metros' }
+    };
+
+    exibirResultados(dadosTeste);
+
+    assertEqual('Endereco completo exibido', document.getElementById('endereco-completo').textContent, 'Av. Paulista, SP');
+    assertEqual('CEP exibido', document.getElementById('cep').textContent, '01310-100');
+    assertEqual('Distrito exibido', document.getElementById('distrito').textContent, 'Bela Vista');
+    assertEqual('SQL exibido', document.getElementById('sql').textContent, 'SQL-123');
+    assertEqual('Valor venal exibido', document.getElementById('valor-venal').textContent, 'R$ 500.000');
+    assertEqual('Area terreno exibida', document.getElementById('area-terreno').textContent, '250 m2');
+    assertEqual('Zona exibida', document.getElementById('zona').textContent, 'ZM');
+    assertEqual('Valor m2 exibido', document.getElementById('valor-m2').textContent, 'R$ 10.000');
+    assertEqual('Metro proximo exibido', document.getElementById('metro-proximo').textContent, 'Trianon-Masp');
+    assert('Resultados visiveis apos exibirResultados', !resultadosDiv.classList.contains('hidden'));
+
+    // --- exibirResultados with null data ---
+    section('exibirResultados - dados nulos');
+
+    // Reset DOM
+    limparResultados();
+    const dadosNulos = {
+      coordenadas: { lat: 0, lon: 0, display_name: 'Teste' },
+      geoSampa: null,
+      iptu: null,
+      zoneamento: null,
+      mercado: null,
+      infraestrutura: null
+    };
+
+    exibirResultados(dadosNulos);
+    assertEqual('CEP mostra "-" quando geoSampa e null', document.getElementById('cep').textContent, '-');
+    assertEqual('Valor venal mostra "-" quando iptu e null', document.getElementById('valor-venal').textContent, '-');
+    assertEqual('Zona mostra "-" quando zoneamento e null', document.getElementById('zona').textContent, '-');
+    assertEqual('Valor m2 mostra "-" quando mercado e null', document.getElementById('valor-m2').textContent, '-');
+    assertEqual('Metro mostra "-" quando infraestrutura e null', document.getElementById('metro-proximo').textContent, '-');
+
+    // --- buscarDados validation ---
+    section('buscarDados - validacao de entrada');
+
+    (async function() {
+      // Empty address should show error
+      enderecoInput.value = '';
+      erroDiv.classList.add('hidden');
+      erroDiv.textContent = '';
+      await buscarDados();
+      assert(
+        'Endereco vazio mostra erro',
+        !erroDiv.classList.contains('hidden')
+      );
+      assertEqual(
+        'Mensagem de erro para endereco vazio',
+        erroDiv.textContent,
+        'Por favor, digite um endereço válido.'
+      );
+
+      // Whitespace-only address
+      enderecoInput.value = '   ';
+      erroDiv.classList.add('hidden');
+      erroDiv.textContent = '';
+      await buscarDados();
+      assert(
+        'Endereco so com espacos mostra erro',
+        !erroDiv.classList.contains('hidden')
+      );
+
+      // --- geocodificarEndereco ---
+      section('geocodificarEndereco - mock fetch');
+
+      const originalFetch = window.fetch;
+
+      // Mock successful geocoding
+      window.fetch = async (url) => ({
+        json: async () => [{ lat: '-23.5505', lon: '-46.6333', display_name: 'Mocked Address' }]
+      });
+
+      try {
+        const coords = await geocodificarEndereco('Av. Paulista');
+        assertEqual('Latitude parseada corretamente', coords.lat, -23.5505);
+        assertEqual('Longitude parseada corretamente', coords.lon, -46.6333);
+        assertEqual('Display name retornado', coords.display_name, 'Mocked Address');
+      } catch (e) {
+        assert('geocodificarEndereco sucesso: ' + e.message, false);
+      }
+
+      // Mock empty results (address not found)
+      window.fetch = async (url) => ({
+        json: async () => []
+      });
+
+      try {
+        await geocodificarEndereco('endereço inexistente xyz');
+        assert('geocodificarEndereco lanca erro para endereco nao encontrado', false);
+      } catch (e) {
+        assertEqual('Mensagem de erro correta', e.message, 'Endereço não encontrado');
+      }
+
+      // --- buscarDadosInfraestrutura ---
+      section('buscarDadosInfraestrutura - com estacoes');
+
+      window.fetch = async (url) => ({
+        json: async () => ({
+          elements: [{
+            lat: -23.5565,
+            lon: -46.6620,
+            tags: { name: 'Trianon-Masp' }
+          }]
+        })
+      });
+
+      const infra = await buscarDadosInfraestrutura({ lat: -23.5613, lon: -46.6558 });
+      assertEqual('Nome da estacao retornado', infra.metroProximo, 'Trianon-Masp');
+      assert('Distancia calculada e retornada', infra.metroDistancia.includes('metros'));
+
+      // No stations nearby
+      window.fetch = async (url) => ({
+        json: async () => ({ elements: [] })
+      });
+
+      const infraVazia = await buscarDadosInfraestrutura({ lat: -23.5613, lon: -46.6558 });
+      assert('Sem estacao retorna mensagem adequada', infraVazia.metroProximo.includes('Nenhuma'));
+
+      // Fetch error
+      window.fetch = async (url) => { throw new Error('Network error'); };
+
+      const infraErro = await buscarDadosInfraestrutura({ lat: -23.5613, lon: -46.6558 });
+      assertEqual('Erro de fetch retorna fallback', infraErro.metroProximo, 'Erro ao buscar');
+
+      // --- buscarDadosGeoSampa ---
+      section('buscarDadosGeoSampa / IPTU / Zoneamento / Mercado');
+
+      const geoSampa = await buscarDadosGeoSampa({ lat: -23.55, lon: -46.63 });
+      assert('buscarDadosGeoSampa retorna objeto', geoSampa !== null && typeof geoSampa === 'object');
+      assert('buscarDadosGeoSampa tem campo sql', 'sql' in geoSampa);
+
+      const iptu = await buscarDadosIPTU('Av. Paulista', { lat: -23.55, lon: -46.63 });
+      assert('buscarDadosIPTU retorna objeto', iptu !== null && typeof iptu === 'object');
+      assert('buscarDadosIPTU tem campo valorVenal', 'valorVenal' in iptu);
+
+      const zoneamento = await buscarDadosZoneamento({ lat: -23.55, lon: -46.63 });
+      assert('buscarDadosZoneamento retorna objeto', zoneamento !== null && typeof zoneamento === 'object');
+      assert('buscarDadosZoneamento tem campo zona', 'zona' in zoneamento);
+
+      const mercado = await buscarDadosMercado('Av. Paulista', { lat: -23.55, lon: -46.63 });
+      assert('buscarDadosMercado retorna objeto', mercado !== null && typeof mercado === 'object');
+      assert('buscarDadosMercado tem campo valorM2', 'valorM2' in mercado);
+
+      // Restore fetch
+      window.fetch = originalFetch;
+
+      // --- Summary ---
+      showSummary();
+    })();
+  </script>
+</body>
+</html>
