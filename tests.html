@@ -22,11 +22,13 @@
   <!-- DOM elements required by popup.js -->
   <div style="display:none">
     <input type="text" id="endereco">
+    <input type="text" id="complemento">
     <button id="buscar"></button>
     <div id="loading" class="hidden"></div>
     <div id="erro" class="hidden"></div>
     <div id="resultados" class="hidden">
       <span id="endereco-completo">-</span>
+      <p id="complemento-resultado-wrapper" class="hidden"><span id="complemento-resultado">-</span></p>
       <span id="cep">-</span>
       <span id="distrito">-</span>
       <span id="subprefeitura">-</span>
@@ -318,9 +320,10 @@
       assert('buscarDadosGeoSampa retorna objeto', geoSampa !== null && typeof geoSampa === 'object');
       assert('buscarDadosGeoSampa tem campo sql', 'sql' in geoSampa);
 
-      const iptu = await buscarDadosIPTU('Av. Paulista', { lat: -23.55, lon: -46.63 });
+      const iptu = await buscarDadosIPTU('Av. Paulista', { lat: -23.55, lon: -46.63 }, 'BL 3 AP 42');
       assert('buscarDadosIPTU retorna objeto', iptu !== null && typeof iptu === 'object');
       assert('buscarDadosIPTU tem campo valorVenal', 'valorVenal' in iptu);
+      assertEqual('buscarDadosIPTU recebe complemento', iptu.complemento, 'BL 3 AP 42');
 
       const zoneamento = await buscarDadosZoneamento({ lat: -23.55, lon: -46.63 });
       assert('buscarDadosZoneamento retorna objeto', zoneamento !== null && typeof zoneamento === 'object');
@@ -332,6 +335,176 @@
 
       // Restore fetch
       window.fetch = originalFetch;
+
+      // --- normalizarComplemento ---
+      section('normalizarComplemento - normalização de complementos');
+
+      assertEqual(
+        'String vazia retorna string vazia',
+        normalizarComplemento(''),
+        ''
+      );
+      assertEqual(
+        'Null retorna string vazia',
+        normalizarComplemento(null),
+        ''
+      );
+      assertEqual(
+        'Espaços retorna string vazia',
+        normalizarComplemento('   '),
+        ''
+      );
+      assertEqual(
+        'Bloco por extenso vira BL',
+        normalizarComplemento('Bloco 3'),
+        'BL 3'
+      );
+      assertEqual(
+        'Apartamento por extenso vira AP',
+        normalizarComplemento('Apartamento 42'),
+        'AP 42'
+      );
+      assertEqual(
+        'Apto vira AP',
+        normalizarComplemento('Apto 42'),
+        'AP 42'
+      );
+      assertEqual(
+        'Bloco e Apartamento juntos',
+        normalizarComplemento('Bloco 3 Apartamento 42'),
+        'BL 3 AP 42'
+      );
+      assertEqual(
+        'BL e AP já abreviados permanecem',
+        normalizarComplemento('BL 3 AP 42'),
+        'BL 3 AP 42'
+      );
+      assertEqual(
+        'Torre e Sala por extenso',
+        normalizarComplemento('Torre A, Sala 101'),
+        'TR A SL 101'
+      );
+      assertEqual(
+        'Edifício por extenso',
+        normalizarComplemento('Edifício Solar'),
+        'ED SOLAR'
+      );
+      assertEqual(
+        'Casa por extenso',
+        normalizarComplemento('Casa 5'),
+        'CS 5'
+      );
+      assertEqual(
+        'Loja por extenso',
+        normalizarComplemento('Loja 12'),
+        'LJ 12'
+      );
+      assertEqual(
+        'Conjunto por extenso',
+        normalizarComplemento('Conjunto 45'),
+        'CJ 45'
+      );
+      assertEqual(
+        'Andar por extenso',
+        normalizarComplemento('Andar 3'),
+        'AN 3'
+      );
+      assertEqual(
+        'Garagem por extenso',
+        normalizarComplemento('Garagem 10'),
+        'GR 10'
+      );
+      assertEqual(
+        'Fundos por extenso',
+        normalizarComplemento('Fundos'),
+        'FD'
+      );
+      assertEqual(
+        'Minúsculas são tratadas',
+        normalizarComplemento('bloco 2 apartamento 10'),
+        'BL 2 AP 10'
+      );
+      assertEqual(
+        'Vírgulas e hífens são removidos',
+        normalizarComplemento('BL 3, AP 42 - Fundos'),
+        'BL 3 AP 42 FD'
+      );
+      assertEqual(
+        'Complemento complexo de condomínio',
+        normalizarComplemento('Bloco 3, Apartamento 42, Andar 4'),
+        'BL 3 AP 42 AN 4'
+      );
+
+      // --- formatarComplemento ---
+      section('formatarComplemento - formatação para exibição');
+
+      assertEqual(
+        'String vazia retorna string vazia',
+        formatarComplemento(''),
+        ''
+      );
+      assertEqual(
+        'BL e AP formatados por extenso',
+        formatarComplemento('BL 3 AP 42'),
+        'Bloco 3, Apartamento 42'
+      );
+      assertEqual(
+        'TR e SL formatados por extenso',
+        formatarComplemento('TR A SL 101'),
+        'Torre A, Sala 101'
+      );
+      assertEqual(
+        'FD sem valor formatado corretamente',
+        formatarComplemento('BL 2 AP 10 FD'),
+        'Bloco 2, Apartamento 10, Fundos'
+      );
+      assertEqual(
+        'ED formatado por extenso',
+        formatarComplemento('ED SOLAR'),
+        'Edifício SOLAR'
+      );
+      assertEqual(
+        'CS formatado por extenso',
+        formatarComplemento('CS 5'),
+        'Casa 5'
+      );
+
+      // --- exibirResultados with complement ---
+      section('exibirResultados - com complemento');
+
+      limparResultados();
+      const dadosComComplemento = {
+        coordenadas: { lat: -23.4891, lon: -46.4750, display_name: 'Av. Águia de Haia, 2100, SP' },
+        complemento: 'BL 3 AP 42',
+        geoSampa: { sql: 'SQL-456', distrito: 'Ponte Rasa', subprefeitura: 'Penha', cep: '03694-000' },
+        iptu: { valorVenal: 'R$ 200.000', areaTerreno: '50 m2', areaConstruida: '60 m2', anoConstrucao: '2005', tipoUso: 'Residencial' },
+        zoneamento: { zona: 'ZM', coefAprov: '2.0', gabarito: '15m' },
+        mercado: { valorM2: 'R$ 5.000', imoveisVenda: '80', precoMedio: 'R$ 300.000' },
+        infraestrutura: { metroProximo: 'Penha', metroDistancia: '1500 metros' }
+      };
+      exibirResultados(dadosComComplemento);
+      assertEqual(
+        'Complemento exibido formatado',
+        document.getElementById('complemento-resultado').textContent,
+        'Bloco 3, Apartamento 42'
+      );
+      assert(
+        'Wrapper do complemento visivel quando complemento existe',
+        !document.getElementById('complemento-resultado-wrapper').classList.contains('hidden')
+      );
+
+      // Without complement
+      limparResultados();
+      const dadosSemComplemento = {
+        coordenadas: { lat: -23.5613, lon: -46.6558, display_name: 'Av. Paulista, SP' },
+        complemento: '',
+        geoSampa: null, iptu: null, zoneamento: null, mercado: null, infraestrutura: null
+      };
+      exibirResultados(dadosSemComplemento);
+      assert(
+        'Wrapper do complemento oculto quando não há complemento',
+        document.getElementById('complemento-resultado-wrapper').classList.contains('hidden')
+      );
 
       // --- Summary ---
       showSummary();

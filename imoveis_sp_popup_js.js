@@ -1,20 +1,146 @@
 // Elementos DOM
 const enderecoInput = document.getElementById('endereco');
+const complementoInput = document.getElementById('complemento');
 const buscarBtn = document.getElementById('buscar');
 const loadingDiv = document.getElementById('loading');
 const erroDiv = document.getElementById('erro');
 const resultadosDiv = document.getElementById('resultados');
+
+// Mapa de abreviações de complementos de endereço
+const COMPLEMENTO_ABREVIACOES = {
+  'BLOCO': 'BL',
+  'APARTAMENTO': 'AP',
+  'APTO': 'AP',
+  'TORRE': 'TR',
+  'SALA': 'SL',
+  'CONJUNTO': 'CJ',
+  'ANDAR': 'AN',
+  'CASA': 'CS',
+  'LOJA': 'LJ',
+  'GARAGEM': 'GR',
+  'EDIFÍCIO': 'ED',
+  'EDIFICIO': 'ED',
+  'LOTE': 'LT',
+  'QUADRA': 'QD',
+  'FUNDOS': 'FD',
+  'FRENTE': 'FR',
+  'COBERTURA': 'COB',
+  'SOBRELOJA': 'SBL',
+  'MEZANINO': 'MZ',
+  'SUBSOLO': 'SS',
+  'TERREO': 'TE',
+  'TÉRREO': 'TE',
+  'KITNET': 'KN',
+  'FLAT': 'FL',
+  'PAVILHÃO': 'PV',
+  'PAVILHAO': 'PV',
+  'GALPÃO': 'GP',
+  'GALPAO': 'GP',
+  'UNIDADE': 'UN',
+};
+
+// Mapa inverso: abreviação -> nome completo
+const COMPLEMENTO_NOMES = {
+  'BL': 'Bloco',
+  'AP': 'Apartamento',
+  'TR': 'Torre',
+  'SL': 'Sala',
+  'CJ': 'Conjunto',
+  'AN': 'Andar',
+  'CS': 'Casa',
+  'LJ': 'Loja',
+  'GR': 'Garagem',
+  'ED': 'Edifício',
+  'LT': 'Lote',
+  'QD': 'Quadra',
+  'FD': 'Fundos',
+  'FR': 'Frente',
+  'COB': 'Cobertura',
+  'SBL': 'Sobreloja',
+  'MZ': 'Mezanino',
+  'SS': 'Subsolo',
+  'TE': 'Térreo',
+  'KN': 'Kitnet',
+  'FL': 'Flat',
+  'PV': 'Pavilhão',
+  'GP': 'Galpão',
+  'UN': 'Unidade',
+};
+
+/**
+ * Normaliza o texto do complemento, convertendo nomes completos para abreviações padrão.
+ * Ex: "Bloco 3 Apartamento 42" -> "BL 3 AP 42"
+ *     "BL 3 AP 42"             -> "BL 3 AP 42"
+ *     "Torre A, Sala 101"      -> "TR A SL 101"
+ */
+function normalizarComplemento(complemento) {
+  if (!complemento || !complemento.trim()) return '';
+
+  let texto = complemento.trim().toUpperCase();
+  // Remove vírgulas, pontos e hífens extras, normaliza espaços
+  texto = texto.replace(/[,.\-;/]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Substituir nomes por extenso pelas abreviações
+  for (const [nome, abrev] of Object.entries(COMPLEMENTO_ABREVIACOES)) {
+    const regex = new RegExp('\\b' + nome + '\\b', 'gi');
+    texto = texto.replace(regex, abrev);
+  }
+
+  // Normalizar espaços novamente após substituições
+  texto = texto.replace(/\s+/g, ' ').trim();
+
+  return texto;
+}
+
+/**
+ * Formata o complemento normalizado para exibição legível.
+ * Ex: "BL 3 AP 42" -> "Bloco 3, Apartamento 42"
+ */
+function formatarComplemento(complementoNormalizado) {
+  if (!complementoNormalizado) return '';
+
+  const partes = complementoNormalizado.split(' ');
+  const resultado = [];
+  let i = 0;
+
+  while (i < partes.length) {
+    const parte = partes[i];
+    if (COMPLEMENTO_NOMES[parte]) {
+      const nome = COMPLEMENTO_NOMES[parte];
+      // Próximo token é o valor (número/letra)
+      if (i + 1 < partes.length && !COMPLEMENTO_NOMES[partes[i + 1]]) {
+        resultado.push(`${nome} ${partes[i + 1]}`);
+        i += 2;
+      } else {
+        resultado.push(nome);
+        i++;
+      }
+    } else {
+      resultado.push(parte);
+      i++;
+    }
+  }
+
+  return resultado.join(', ');
+}
 
 // Event Listeners
 buscarBtn.addEventListener('click', buscarDados);
 enderecoInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') buscarDados();
 });
+if (complementoInput) {
+  complementoInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') buscarDados();
+  });
+}
 
 // Função principal de busca
 async function buscarDados() {
   const endereco = enderecoInput.value.trim();
-  
+  const complementoRaw = complementoInput ? complementoInput.value.trim() : '';
+  const complemento = normalizarComplemento(complementoRaw);
+
   if (!endereco) {
     mostrarErro('Por favor, digite um endereço válido.');
     return;
@@ -22,11 +148,11 @@ async function buscarDados() {
 
   mostrarLoading();
   limparResultados();
-  
+
   try {
-    // 1. Geocodificar endereço
+    // 1. Geocodificar endereço (sem complemento - geocoding usa apenas rua e número)
     const coordenadas = await geocodificarEndereco(endereco);
-    
+
     // 2. Buscar dados em paralelo de todas as fontes
     const [
       dadosGeoSampa,
@@ -36,7 +162,7 @@ async function buscarDados() {
       dadosInfraestrutura
     ] = await Promise.allSettled([
       buscarDadosGeoSampa(coordenadas),
-      buscarDadosIPTU(endereco, coordenadas),
+      buscarDadosIPTU(endereco, coordenadas, complemento),
       buscarDadosZoneamento(coordenadas),
       buscarDadosMercado(endereco, coordenadas),
       buscarDadosInfraestrutura(coordenadas)
@@ -45,6 +171,7 @@ async function buscarDados() {
     // 3. Exibir resultados
     exibirResultados({
       coordenadas,
+      complemento,
       geoSampa: dadosGeoSampa.status === 'fulfilled' ? dadosGeoSampa.value : null,
       iptu: dadosIPTU.status === 'fulfilled' ? dadosIPTU.value : null,
       zoneamento: dadosZoneamento.status === 'fulfilled' ? dadosZoneamento.value : null,
@@ -53,7 +180,7 @@ async function buscarDados() {
     });
 
     esconderLoading();
-    
+
   } catch (erro) {
     esconderLoading();
     mostrarErro(`Erro ao buscar dados: ${erro.message}`);
@@ -107,13 +234,16 @@ async function buscarDadosGeoSampa(coordenadas) {
 }
 
 // Buscar dados de IPTU
-async function buscarDadosIPTU(endereco, coordenadas) {
+async function buscarDadosIPTU(endereco, coordenadas, complemento) {
   // Simulação - Dados reais exigiriam scraping do site da prefeitura
   // ou acesso a base de dados oficial
-  
+
   // A Prefeitura de SP não disponibiliza API pública de IPTU
   // Seria necessário fazer web scraping ou comprar acesso a bases privadas
-  
+
+  // O complemento (ex: "BL 3 AP 42") é essencial para identificar
+  // a unidade específica em condomínios, pois cada unidade tem seu próprio IPTU
+
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve({
@@ -121,7 +251,8 @@ async function buscarDadosIPTU(endereco, coordenadas) {
         areaTerreno: 'Dados via consulta cadastral',
         areaConstruida: 'Dados via consulta cadastral',
         anoConstrucao: '-',
-        tipoUso: 'Residencial/Comercial (verificar)'
+        tipoUso: 'Residencial/Comercial (verificar)',
+        complemento: complemento || null
       });
     }, 1200);
   });
@@ -228,6 +359,19 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
 function exibirResultados(dados) {
   // Localização
   document.getElementById('endereco-completo').textContent = dados.coordenadas.display_name;
+
+  // Complemento
+  const complementoWrapper = document.getElementById('complemento-resultado-wrapper');
+  const complementoSpan = document.getElementById('complemento-resultado');
+  if (dados.complemento) {
+    const formatado = formatarComplemento(dados.complemento);
+    complementoSpan.textContent = formatado || dados.complemento;
+    if (complementoWrapper) complementoWrapper.classList.remove('hidden');
+  } else {
+    complementoSpan.textContent = '-';
+    if (complementoWrapper) complementoWrapper.classList.add('hidden');
+  }
+
   document.getElementById('cep').textContent = dados.geoSampa?.cep || '-';
   document.getElementById('distrito').textContent = dados.geoSampa?.distrito || '-';
   document.getElementById('subprefeitura').textContent = dados.geoSampa?.subprefeitura || '-';

@@ -12,13 +12,22 @@
     
     <div class="input-section">
       <label for="endereco">Endereço Completo:</label>
-      <input 
-        type="text" 
-        id="endereco" 
+      <input
+        type="text"
+        id="endereco"
         placeholder="Ex: Avenida Paulista, 1578"
         autocomplete="off"
       >
       <small>Digite a rua e número em São Paulo/SP</small>
+
+      <label for="complemento">Complemento:</label>
+      <input
+        type="text"
+        id="complemento"
+        placeholder="Ex: BL 3 AP 42, Torre A Sala 101"
+        autocomplete="off"
+      >
+      <small>Bloco (BL), Apartamento (AP), Torre (TR), Sala (SL), Conjunto (CJ), Andar (AN), Casa (CS), Loja (LJ)</small>
       <button id="buscar">Buscar Dados</button>
     </div>
 
@@ -36,6 +45,7 @@
         <h2>📍 Localização e Cadastro</h2>
         <div id="dados-localizacao">
           <p><strong>Endereço Completo:</strong> <span id="endereco-completo">-</span></p>
+          <p id="complemento-resultado-wrapper" class="hidden"><strong>Complemento:</strong> <span id="complemento-resultado">-</span></p>
           <p><strong>CEP:</strong> <span id="cep">-</span></p>
           <p><strong>Distrito:</strong> <span id="distrito">-</span></p>
           <p><strong>Subprefeitura:</strong> <span id="subprefeitura">-</span></p>
