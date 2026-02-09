@@ -12,7 +12,7 @@
     "http://*/*"
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "imoveis_sp_popup_html.html",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
@@ -20,7 +20,7 @@
     }
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "imoveis_sp_background_js.js"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
