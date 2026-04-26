@@ -28,10 +28,13 @@
     <div id="resultados" class="hidden">
       <span id="endereco-completo">-</span>
       <span id="cep">-</span>
+      <span id="bairro">-</span>
       <span id="distrito">-</span>
       <span id="subprefeitura">-</span>
       <span id="sql">-</span>
-      <span id="valor-venal">-</span>
+      <span id="proprietario">-</span>
+      <span id="compromissario">-</span>
+      <span id="valor-venal">-</span><a id="valor-venal-link" href="#" style="display:none"></a>
       <span id="area-terreno">-</span>
       <span id="area-construida">-</span>
       <span id="ano-construcao">-</span>
@@ -47,7 +50,7 @@
     </div>
   </div>
 
-  <script src="imoveis_sp_popup_js.js"></script>
+  <script src="popup.js"></script>
   <script>
     // ===== Mini test framework =====
     let passed = 0;
@@ -152,6 +155,48 @@
       111, 2
     );
 
+    // --- extrairLogradouroNumero ---
+    section('extrairLogradouroNumero - parsing de endereco');
+
+    const e1 = extrairLogradouroNumero('Avenida Paulista, 1578');
+    assertEqual('Av Paulista - palavras', e1.palavras, 'PAULISTA');
+    assertEqual('Av Paulista - numero', e1.numero, '1578');
+
+    const e2 = extrairLogradouroNumero('Rua Desembargador Carneiro Ribeiro, 763');
+    assertEqual('Des Carneiro - usa ultimas 2 palavras', e2.palavras, 'CARNEIRO RIBEIRO');
+    assertEqual('Des Carneiro - numero', e2.numero, '763');
+
+    const e3 = extrairLogradouroNumero('Rua Nadime Ackel, 249');
+    assertEqual('Nadime Ackel - palavras', e3.palavras, 'NADIME ACKEL');
+    assertEqual('Nadime Ackel - numero', e3.numero, '249');
+
+    const e4 = extrairLogradouroNumero('Alameda Santos 500');
+    assertEqual('Sem virgula - palavras', e4.palavras, 'SANTOS');
+    assertEqual('Sem virgula - numero', e4.numero, '500');
+
+    const e5 = extrairLogradouroNumero('Av. Brasil, 100');
+    assertEqual('Av. abreviado - palavras', e5.palavras, 'BRASIL');
+    assertEqual('Av. abreviado - numero', e5.numero, '100');
+
+    const e6 = extrairLogradouroNumero('Rua Desembargador Rocha Portela, 602');
+    assertEqual('Rocha Portela - ultimas 2 palavras', e6.palavras, 'ROCHA PORTELA');
+    assertEqual('Rocha Portela - numero', e6.numero, '602');
+
+    const e7 = extrairLogradouroNumero('Rua São Paulo, 300');
+    assertEqual('Acento removido - palavras', e7.palavras, 'SAO PAULO');
+    assertEqual('Acento removido - numero', e7.numero, '300');
+
+    // --- latLonToUTM23S ---
+    section('latLonToUTM23S - conversao de coordenadas');
+
+    const utmPaulista = latLonToUTM23S(-23.5613, -46.6558);
+    assertApprox('Av Paulista Easting ~331005', utmPaulista.easting, 331005, 50);
+    assertApprox('Av Paulista Northing ~7393366', utmPaulista.northing, 7393366, 50);
+
+    const utmAldeia = latLonToUTM23S(-23.5434169, -46.4928554);
+    assertApprox('Av Aldeia Easting ~347617', utmAldeia.easting, 347617, 50);
+    assertApprox('Av Aldeia Northing ~7395529', utmAldeia.northing, 7395529, 50);
+
     // --- UI functions ---
     section('Funcoes de UI');
 
@@ -179,8 +224,9 @@
 
     const dadosTeste = {
       coordenadas: { lat: -23.5613, lon: -46.6558, display_name: 'Av. Paulista, SP' },
-      geoSampa: { sql: 'SQL-123', distrito: 'Bela Vista', subprefeitura: 'Se', cep: '01310-100' },
+      geoSampa: { sql: 'SQL-123', distrito: 'Bela Vista', subprefeitura: 'Se', cep: '01310-100', bairro: 'Bela Vista' },
       iptu: { valorVenal: 'R$ 500.000', areaTerreno: '250 m2', areaConstruida: '180 m2', anoConstrucao: '1990', tipoUso: 'Residencial' },
+      proprietario: { proprietario: 'JOAO DA SILVA', compromissario: 'MARIA SANTOS' },
       zoneamento: { zona: 'ZM', coefAprov: '2.0', gabarito: '15m' },
       mercado: { valorM2: 'R$ 10.000', imoveisVenda: '150', precoMedio: 'R$ 800.000' },
       infraestrutura: { metroProximo: 'Trianon-Masp', metroDistancia: '200 metros' }
@@ -190,14 +236,18 @@
 
     assertEqual('Endereco completo exibido', document.getElementById('endereco-completo').textContent, 'Av. Paulista, SP');
     assertEqual('CEP exibido', document.getElementById('cep').textContent, '01310-100');
+    assertEqual('Bairro exibido', document.getElementById('bairro').textContent, 'Bela Vista');
     assertEqual('Distrito exibido', document.getElementById('distrito').textContent, 'Bela Vista');
     assertEqual('SQL exibido', document.getElementById('sql').textContent, 'SQL-123');
+    assertEqual('Proprietario exibido', document.getElementById('proprietario').textContent, 'JOAO DA SILVA');
+    assertEqual('Compromissario exibido', document.getElementById('compromissario').textContent, 'MARIA SANTOS');
     assertEqual('Valor venal exibido', document.getElementById('valor-venal').textContent, 'R$ 500.000');
     assertEqual('Area terreno exibida', document.getElementById('area-terreno').textContent, '250 m2');
     assertEqual('Zona exibida', document.getElementById('zona').textContent, 'ZM');
     assertEqual('Valor m2 exibido', document.getElementById('valor-m2').textContent, 'R$ 10.000');
     assertEqual('Metro proximo exibido', document.getElementById('metro-proximo').textContent, 'Trianon-Masp');
     assert('Resultados visiveis apos exibirResultados', !resultadosDiv.classList.contains('hidden'));
+    assert('Link valor venal visivel quando SQL presente', document.getElementById('valor-venal-link').style.display === 'inline');
 
     // --- exibirResultados with null data ---
     section('exibirResultados - dados nulos');
@@ -208,6 +258,7 @@
       coordenadas: { lat: 0, lon: 0, display_name: 'Teste' },
       geoSampa: null,
       iptu: null,
+      proprietario: null,
       zoneamento: null,
       mercado: null,
       infraestrutura: null
@@ -215,10 +266,14 @@
 
     exibirResultados(dadosNulos);
     assertEqual('CEP mostra "-" quando geoSampa e null', document.getElementById('cep').textContent, '-');
+    assertEqual('Bairro mostra "-" quando geoSampa e null', document.getElementById('bairro').textContent, '-');
+    assertEqual('Proprietario mostra "-" quando null', document.getElementById('proprietario').textContent, '-');
+    assertEqual('Compromissario mostra "-" quando null', document.getElementById('compromissario').textContent, '-');
     assertEqual('Valor venal mostra "-" quando iptu e null', document.getElementById('valor-venal').textContent, '-');
     assertEqual('Zona mostra "-" quando zoneamento e null', document.getElementById('zona').textContent, '-');
     assertEqual('Valor m2 mostra "-" quando mercado e null', document.getElementById('valor-m2').textContent, '-');
     assertEqual('Metro mostra "-" quando infraestrutura e null', document.getElementById('metro-proximo').textContent, '-');
+    assert('Link valor venal oculto quando SQL ausente', document.getElementById('valor-venal-link').style.display === 'none');
 
     // --- buscarDados validation ---
     section('buscarDados - validacao de entrada');
@@ -311,16 +366,224 @@
       const infraErro = await buscarDadosInfraestrutura({ lat: -23.5613, lon: -46.6558 });
       assertEqual('Erro de fetch retorna fallback', infraErro.metroProximo, 'Erro ao buscar');
 
-      // --- buscarDadosGeoSampa ---
-      section('buscarDadosGeoSampa / IPTU / Zoneamento / Mercado');
+      // --- extrairDadosLote ---
+      section('extrairDadosLote - parsing de propriedades');
 
-      const geoSampa = await buscarDadosGeoSampa({ lat: -23.55, lon: -46.63 });
+      const dadosLote1 = extrairDadosLote({
+        cd_setor_fiscal: '148', cd_quadra_fiscal: '063', cd_lote: '0024', cd_digito_sql: '1',
+        qt_area_terreno: 250.5, qt_area_construida: 180.75, dc_tipo_uso_imovel: 'Residencial'
+      });
+      assertEqual('SQL formatado como setor.quadra.lote-digito', dadosLote1.sql, '148.063.0024-1');
+      assertEqual('Area terreno formatada', dadosLote1.areaTerreno, '250.50 m²');
+      assertEqual('Area construida formatada', dadosLote1.areaConstruida, '180.75 m²');
+      assertEqual('Tipo de uso retornado', dadosLote1.tipoUso, 'Residencial');
+
+      const dadosLote0 = extrairDadosLote({
+        cd_setor_fiscal: '010', cd_quadra_fiscal: '020', cd_lote: '0030', cd_digito_sql: '0',
+        qt_area_terreno: null, qt_area_construida: null, dc_tipo_uso_imovel: null
+      });
+      assertEqual('SQL com digito "0" formata sem hifen', dadosLote0.sql, '010.020.0030');
+      assertEqual('Area terreno null retorna null', dadosLote0.areaTerreno, null);
+
+      // --- buscarLoteGeoSampa (WFS API) ---
+      section('buscarLoteGeoSampa - WFS mock');
+
+      // Mock WFS: name+number query returns a match
+      window.fetch = async (url) => ({
+        json: async () => ({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {
+              cd_setor_fiscal: '113',
+              cd_quadra_fiscal: '196',
+              cd_lote: '0047',
+              cd_digito_sql: '5',
+              qt_area_terreno: 250.5,
+              qt_area_construida: 180.75,
+              dc_tipo_uso_imovel: 'Residencial',
+              nm_logradouro_completo: 'R DESEM CARNEIRO RIBEIRO',
+              cd_numero_porta: '763'
+            }
+          }]
+        })
+      });
+
+      const lote = await buscarLoteGeoSampa('Rua Desembargador Carneiro Ribeiro, 763', { lat: -23.54, lon: -46.49 });
+      assert('buscarLoteGeoSampa retorna objeto', lote !== null && typeof lote === 'object');
+      assertEqual('SQL correto via nome+numero', lote.sql, '113.196.0047-5');
+
+      // Mock WFS: name+number returns empty, fallback to DWITHIN succeeds
+      let fetchCallCount = 0;
+      window.fetch = async (url) => {
+        fetchCallCount++;
+        if (fetchCallCount === 1) {
+          // First call (name+number) returns empty
+          return { json: async () => ({ type: 'FeatureCollection', features: [] }) };
+        }
+        // Second call (DWITHIN fallback) returns result
+        return {
+          json: async () => ({
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature',
+              properties: {
+                cd_setor_fiscal: '009', cd_quadra_fiscal: '096', cd_lote: '0001', cd_digito_sql: '0',
+                qt_area_terreno: 500, qt_area_construida: 300, dc_tipo_uso_imovel: 'Comercial'
+              }
+            }]
+          })
+        };
+      };
+
+      const loteFallback = await buscarLoteGeoSampa('Avenida Paulista, 1578', { lat: -23.56, lon: -46.66 });
+      assertEqual('Fallback DWITHIN retorna SQL', loteFallback.sql, '009.096.0001');
+
+      // Mock WFS: both strategies return empty
+      window.fetch = async (url) => ({
+        json: async () => ({ type: 'FeatureCollection', features: [] })
+      });
+
+      const loteVazio = await buscarLoteGeoSampa('Rua Inexistente, 999', { lat: -23.55, lon: -46.63 });
+      assertEqual('Ambas estrategias vazias retorna null', loteVazio, null);
+
+      // --- buscarCepViaCEP ---
+      section('buscarCepViaCEP - ViaCEP mock');
+
+      window.fetch = async (url) => ({
+        json: async () => ([{
+          cep: '01310-100',
+          logradouro: 'Avenida Paulista',
+          bairro: 'Bela Vista'
+        }])
+      });
+
+      const cepData = await buscarCepViaCEP('Avenida Paulista, 1578');
+      assertEqual('ViaCEP retorna CEP', cepData.cep, '01310-100');
+      assertEqual('ViaCEP retorna bairro', cepData.bairro, 'Bela Vista');
+
+      // Empty logradouro
+      const cepVazio = await buscarCepViaCEP('1234');
+      assertEqual('Logradouro vazio retorna cep "-"', cepVazio.cep, '-');
+
+      // --- buscarDadosGeoSampa (combined) ---
+      section('buscarDadosGeoSampa - combined GeoSampa + ViaCEP');
+
+      // Mock both APIs: GeoSampa WFS + ViaCEP
+      window.fetch = async (url) => {
+        if (url.includes('geosampa')) {
+          return {
+            json: async () => ({
+              type: 'FeatureCollection',
+              features: [{
+                type: 'Feature',
+                properties: {
+                  cd_setor_fiscal: '148',
+                  cd_quadra_fiscal: '063',
+                  cd_lote: '0024',
+                  cd_digito_sql: '1',
+                  qt_area_terreno: 250.5,
+                  qt_area_construida: 180.75,
+                  dc_tipo_uso_imovel: 'Residencial',
+                  nm_logradouro_completo: 'AV PAULISTA',
+                  cd_numero_porta: '1578'
+                }
+              }]
+            })
+          };
+        }
+        // ViaCEP
+        return {
+          json: async () => ([{
+            cep: '01310-100',
+            logradouro: 'Avenida Paulista',
+            bairro: 'Bela Vista'
+          }])
+        };
+      };
+
+      const geoSampa = await buscarDadosGeoSampa('Avenida Paulista, 1578', { lat: -23.55, lon: -46.63 });
       assert('buscarDadosGeoSampa retorna objeto', geoSampa !== null && typeof geoSampa === 'object');
-      assert('buscarDadosGeoSampa tem campo sql', 'sql' in geoSampa);
+      assertEqual('buscarDadosGeoSampa retorna CEP do ViaCEP', geoSampa.cep, '01310-100');
+      assertEqual('buscarDadosGeoSampa retorna bairro do ViaCEP', geoSampa.bairro, 'Bela Vista');
+      assertEqual('buscarDadosGeoSampa retorna SQL do WFS', geoSampa.sql, '148.063.0024-1');
+      assertEqual('buscarDadosGeoSampa retorna areaTerreno', geoSampa.areaTerreno, '250.50 m²');
+      assertEqual('buscarDadosGeoSampa retorna areaConstruida', geoSampa.areaConstruida, '180.75 m²');
 
-      const iptu = await buscarDadosIPTU('Av. Paulista', { lat: -23.55, lon: -46.63 });
-      assert('buscarDadosIPTU retorna objeto', iptu !== null && typeof iptu === 'object');
-      assert('buscarDadosIPTU tem campo valorVenal', 'valorVenal' in iptu);
+      // Both APIs fail - should still return defaults
+      window.fetch = async (url) => { throw new Error('Network error'); };
+
+      const geoSampaErro = await buscarDadosGeoSampa('Avenida Paulista', { lat: -23.55, lon: -46.63 });
+      assertEqual('Ambas APIs falham - sql retorna "-"', geoSampaErro.sql, '-');
+      assertEqual('Ambas APIs falham - cep retorna "-"', geoSampaErro.cep, '-');
+
+      // Restore fetch for remaining tests
+      window.fetch = originalFetch;
+
+      // --- buscarDadosIPTU (from GeoSampa data) ---
+      section('buscarDadosIPTU - dados do GeoSampa');
+
+      const iptuComDados = buscarDadosIPTU({
+        sql: '113.196.0047-5',
+        areaTerreno: '250.50 m²',
+        areaConstruida: '180.75 m²',
+        tipoUso: 'Residencial'
+      });
+      assertEqual('IPTU valor venal com SQL mostra mensagem portal', iptuComDados.valorVenal, 'Use o SQL acima no portal');
+      assertEqual('IPTU area terreno do GeoSampa', iptuComDados.areaTerreno, '250.50 m²');
+      assertEqual('IPTU area construida do GeoSampa', iptuComDados.areaConstruida, '180.75 m²');
+      assertEqual('IPTU tipo uso do GeoSampa', iptuComDados.tipoUso, 'Residencial');
+      assertEqual('IPTU ano construcao sempre "-"', iptuComDados.anoConstrucao, '-');
+
+      const iptuSemDados = buscarDadosIPTU(null);
+      assertEqual('IPTU sem dados - area terreno "-"', iptuSemDados.areaTerreno, '-');
+      assertEqual('IPTU sem dados - area construida "-"', iptuSemDados.areaConstruida, '-');
+      assertEqual('IPTU sem dados - tipo uso "-"', iptuSemDados.tipoUso, '-');
+      assertEqual('IPTU sem dados - ano construcao "-"', iptuSemDados.anoConstrucao, '-');
+      assertEqual('IPTU sem dados - valor venal requer SQL', iptuSemDados.valorVenal, 'Requer SQL do imóvel');
+
+      // --- buscarProprietario ---
+      section('buscarProprietario - mock sf8663');
+
+      // Mock: GET returns ASP.NET tokens, POST returns owner data
+      let propFetchCount = 0;
+      window.fetch = async (url, opts) => {
+        propFetchCount++;
+        if (!opts || opts.method !== 'POST') {
+          // GET request — return page with ASP.NET tokens
+          return { text: async () => `
+            <input name="__VIEWSTATE" value="fakeViewState" />
+            <input name="__EVENTVALIDATION" value="fakeEV" />
+            <input name="__VIEWSTATEGENERATOR" value="fakeVSG" />
+          `};
+        }
+        // POST request — return page with owner data
+        return { text: async () => `
+          <input name="txtProprietarioNome" value="JOAO DA SILVA" readonly="readonly" />
+          <input name="txtCompromissarioNome" value="MARIA SANTOS" readonly="readonly" />
+        `};
+      };
+
+      const propResult = await buscarProprietario('113.196.0047-5');
+      assertEqual('Proprietario extraido do sf8663', propResult.proprietario, 'JOAO DA SILVA');
+      assertEqual('Compromissario extraido do sf8663', propResult.compromissario, 'MARIA SANTOS');
+      assert('buscarProprietario fez 2 fetch (GET+POST)', propFetchCount === 2);
+
+      // SQL without digito
+      propFetchCount = 0;
+      const propSemDigito = await buscarProprietario('009.096.0000');
+      assert('SQL sem digito faz 2 fetch', propFetchCount === 2);
+
+      // Invalid SQL returns defaults
+      const propInvalido = await buscarProprietario('-');
+      assertEqual('SQL invalido retorna proprietario "-"', propInvalido.proprietario, '-');
+
+      const propNull = await buscarProprietario(null);
+      assertEqual('SQL null retorna proprietario "-"', propNull.proprietario, '-');
+
+      window.fetch = originalFetch;
+
+      section('Zoneamento / Mercado');
 
       const zoneamento = await buscarDadosZoneamento({ lat: -23.55, lon: -46.63 });
       assert('buscarDadosZoneamento retorna objeto', zoneamento !== null && typeof zoneamento === 'object');
