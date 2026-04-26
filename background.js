@@ -64,6 +64,13 @@ async function fetchHtmlData(url, method = 'GET', body = null, headers = {}) {
   }
   const response = await fetch(url, opts);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const contentType = response.headers.get('content-type') || '';
+  const charsetMatch = contentType.match(/charset=([\w-]+)/i);
+  const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'utf-8';
+  if (charset !== 'utf-8') {
+    const buffer = await response.arrayBuffer();
+    return new TextDecoder(charset).decode(buffer);
+  }
   return await response.text();
 }
 

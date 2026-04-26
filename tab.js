@@ -32,14 +32,22 @@ async function buscarDados() {
   limparResultados();
 
   try {
-    // 1. Geocodificar + buscar lote em paralelo
+    // 1. Geocodificar + buscar lote por nome em paralelo
     const [geoResult, geoSampaResult] = await Promise.allSettled([
       geocodificarEndereco(endereco),
       buscarDadosGeoSampa(endereco, null)
     ]);
 
     let coordenadas = geoResult.status === 'fulfilled' ? geoResult.value : null;
-    const geoSampaData = geoSampaResult.status === 'fulfilled' ? geoSampaResult.value : null;
+    let geoSampaData = geoSampaResult.status === 'fulfilled' ? geoSampaResult.value : null;
+
+    // If name query failed, retry with Nominatim coords (spatial fallback for condos)
+    if ((!geoSampaData || geoSampaData.sql === '-') && coordenadas) {
+      try {
+        const fallback = await buscarDadosGeoSampa(endereco, coordenadas);
+        if (fallback && fallback.sql !== '-') geoSampaData = fallback;
+      } catch (e) {}
+    }
 
     // Prefer GeoSampa lote centroid over Nominatim (more accurate for SP addresses)
     if (geoSampaData?.centroid) {
