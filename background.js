@@ -29,6 +29,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (request.action === 'fetchHtml') {
+    fetchHtmlData(request.url, request.method || 'GET', request.body, request.headers)
+      .then(html => sendResponse({ success: true, html }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
   
   // Cache de requisições
   if (request.action === 'cacheData') {
@@ -46,6 +53,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
+async function fetchHtmlData(url, method = 'GET', body = null, headers = {}) {
+  const opts = { method, headers: { ...headers } };
+  if (body) {
+    opts.body = body;
+    if (!opts.headers['Content-Type']) {
+      opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    }
+  }
+  const response = await fetch(url, opts);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return await response.text();
+}
 
 async function fetchPostData(url, body) {
   const response = await fetch(url, {

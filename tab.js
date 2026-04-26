@@ -66,7 +66,16 @@ async function buscarDados() {
       proprietarioData = { proprietario: `Erro: ${e.message}`, compromissario: '-' };
     }
 
-    // 4. Exibir resultados
+    // 4. Buscar matrícula (cache local → scraping → link manual)
+    const cartorioData = coordenadas && results[5]?.status === 'fulfilled' ? results[5].value : { cartorio: '-', endereco: '-' };
+    let matriculaData = null;
+    try {
+      matriculaData = await buscarMatricula(geoSampaData?.sql, endereco, cartorioData);
+    } catch (e) {
+      matriculaData = { matricula: '-', fonte: '' };
+    }
+
+    // 5. Exibir resultados
     exibirResultados({
       coordenadas: coordenadas || { lat: 0, lon: 0, display_name: endereco },
       geoSampa: geoSampaData,
@@ -76,7 +85,8 @@ async function buscarDados() {
       mercado: coordenadas && results[2]?.status === 'fulfilled' ? results[2].value : null,
       infraestrutura: coordenadas && results[3]?.status === 'fulfilled' ? results[3].value : null,
       subprefeitura: coordenadas && results[4]?.status === 'fulfilled' ? results[4].value : '-',
-      cartorio: coordenadas && results[5]?.status === 'fulfilled' ? results[5].value : { cartorio: '-', endereco: '-' }
+      cartorio: cartorioData,
+      matricula: matriculaData
     });
 
     esconderLoading();
@@ -526,6 +536,90 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// === MATRÍCULA: cache local + scraping ===
+
+// URLs dos cartórios de SP para consulta manual
+const CARTORIOS_URL = {
+  '1º': 'https://www.1risp.com.br',
+  '2º': 'https://www.2risp.com.br',
+  '3º': 'https://www.3risp.com.br',
+  '4º': 'https://www.4risp.com.br/cartorio/consultas/ri/indicador/ri-consulta-indicador',
+  '5º': 'https://www.quinto.com.br/consulte/pesquisa-de-matricula',
+  '6º': 'https://www.6risp.com.br',
+  '7º': 'https://www.7risp.com.br',
+  '8º': 'https://www.oitavo.com.br/consultaeletronica/imovel',
+  '9º': 'https://www.9risp.com.br',
+  '10º': 'https://www.10risp.com.br',
+  '11º': 'https://www.11risp.com.br',
+  '12º': 'https://www.12risp.com.br',
+  '13º': 'https://www.13risp.com.br',
+  '14º': 'https://www.14risp.com.br',
+  '15º': 'https://www.15risp.com.br',
+  '16º': 'https://www.16risp.com.br',
+  '17º': 'https://www.17risp.com.br',
+  '18º': 'https://www.18risp.com.br'
+};
+
+async function buscarMatricula(sql, endereco, cartorioData) {
+  if (!sql || sql === '-') return { matricula: '-', fonte: '' };
+
+  // 1. Check cache
+  const cacheKey = `matricula_${sql}`;
+  const cached = await getCachedMatricula(cacheKey);
+  if (cached) return { matricula: cached.matricula, fonte: 'cache local' };
+
+  // 2. Try automated scraping (8º RI only)
+  const numCartorio = cartorioData?.cartorio?.match(/^(\d+)º/)?.[1];
+  if (numCartorio === '8') {
+    try {
+      const matricula = await scrapeOitavoRI(endereco);
+      if (matricula) {
+        await salvarMatriculaCache(cacheKey, matricula, numCartorio);
+        return { matricula, fonte: 'scraping 8º RI' };
+      }
+    } catch (e) {
+      // Scraping failed, fall through
+    }
+  }
+
+  // 3. Return link for manual lookup
+  const cartNum = numCartorio ? `${numCartorio}º` : null;
+  const url = cartNum && CARTORIOS_URL[cartNum] ? CARTORIOS_URL[cartNum] : null;
+  return { matricula: '-', fonte: '', urlCartorio: url, numCartorio: cartNum };
+}
+
+async function scrapeOitavoRI(endereco) {
+  const { palavras, numero } = extrairLogradouroNumero(endereco);
+  if (!palavras || !numero) return null;
+
+  const body = `tipopesquisa=endereco&endereco=${encodeURIComponent(palavras)}&numero=${encodeURIComponent(numero)}&busca=Procurar`;
+  const resp = await chrome.runtime.sendMessage({
+    action: 'fetchHtml',
+    url: 'https://www.oitavo.com.br/consultaeletronica/result_pesquisa_imovel.php',
+    method: 'POST',
+    body,
+    headers: { 'Referer': 'https://www.oitavo.com.br/consultaeletronica/imovel' }
+  });
+
+  if (!resp.success) return null;
+
+  const match = resp.html.match(/matr[ií]cula[^0-9]*(\d+)/i);
+  return match ? match[1] : null;
+}
+
+async function getCachedMatricula(key) {
+  return new Promise(resolve => {
+    chrome.storage.local.get([key], result => resolve(result[key] || null));
+  });
+}
+
+async function salvarMatriculaCache(key, matricula, cartorio) {
+  const data = { matricula, cartorio, data: new Date().toISOString() };
+  return new Promise(resolve => {
+    chrome.storage.local.set({ [key]: data }, resolve);
+  });
+}
+
 // Exibir resultados na interface
 function exibirResultados(dados) {
   document.getElementById('endereco-completo').textContent = dados.coordenadas.display_name;
@@ -537,6 +631,42 @@ function exibirResultados(dados) {
   document.getElementById('proprietario').textContent = dados.proprietario?.proprietario || '-';
   document.getElementById('compromissario').textContent = dados.proprietario?.compromissario || '-';
   document.getElementById('cartorio').textContent = dados.cartorio?.cartorio || '-';
+
+  // Matrícula
+  const matriculaSpan = document.getElementById('matricula');
+  const matriculaLink = document.getElementById('matricula-link');
+  const btnSalvar = document.getElementById('btn-salvar-matricula');
+  const inputRow = document.getElementById('matricula-input-row');
+  const mat = dados.matricula;
+
+  if (mat?.matricula && mat.matricula !== '-') {
+    matriculaSpan.textContent = mat.matricula + (mat.fonte ? ` (${mat.fonte})` : '');
+    matriculaLink.style.display = 'none';
+    btnSalvar.style.display = 'none';
+    inputRow.style.display = 'none';
+  } else {
+    matriculaSpan.textContent = 'Não encontrada';
+    if (mat?.urlCartorio) {
+      matriculaLink.href = mat.urlCartorio;
+      matriculaLink.style.display = 'inline';
+    }
+    btnSalvar.style.display = 'inline';
+    btnSalvar.onclick = () => {
+      inputRow.style.display = 'block';
+      btnSalvar.style.display = 'none';
+    };
+    document.getElementById('btn-confirmar-matricula').onclick = async () => {
+      const val = document.getElementById('matricula-manual').value.trim();
+      if (!val) return;
+      const sql = dados.geoSampa?.sql;
+      if (sql && sql !== '-') {
+        await salvarMatriculaCache(`matricula_${sql}`, val, mat?.numCartorio || '');
+        matriculaSpan.textContent = `${val} (salvo manualmente)`;
+        inputRow.style.display = 'none';
+        matriculaLink.style.display = 'none';
+      }
+    };
+  }
 
   document.getElementById('valor-venal').textContent = dados.iptu?.valorVenal || '-';
   document.getElementById('area-terreno').textContent = dados.iptu?.areaTerreno || '-';
