@@ -63,7 +63,7 @@ async function buscarDados() {
     try {
       proprietarioData = await buscarProprietario(geoSampaData?.sql);
     } catch (e) {
-      proprietarioData = { proprietario: 'Erro ao consultar portal', compromissario: '-' };
+      proprietarioData = { proprietario: `Erro: ${e.message}`, compromissario: '-' };
     }
 
     // 4. Exibir resultados
@@ -399,11 +399,52 @@ async function buscarProprietario(sql) {
   };
 }
 
+// Buscar zoneamento via GeoSampa WFS (Lei 18.177/2024, fallback Lei 13.885/2004)
 async function buscarDadosZoneamento(coordenadas) {
+  const utm = latLonToUTM23S(coordenadas.lat, coordenadas.lon);
+  const point = `POINT(${utm.easting.toFixed(2)} ${utm.northing.toFixed(2)})`;
+
+  // Try new law first (INTERSECTS then DWITHIN for boundary cases)
+  let features = await consultarWfsGeoSampaLayer(
+    'geoportal:perimetro_zona_lei_18177_24',
+    `INTERSECTS(ge_poligono,${point})`,
+    'cd_zoneamento_perimetro,tx_zoneamento_perimetro,cd_numero_legislacao_zoneamento,an_legislacao_zoneamento'
+  );
+  if (features.length === 0) {
+    features = await consultarWfsGeoSampaLayer(
+      'geoportal:perimetro_zona_lei_18177_24',
+      `DWITHIN(ge_poligono,${point},100,meters)`,
+      'cd_zoneamento_perimetro,tx_zoneamento_perimetro,cd_numero_legislacao_zoneamento,an_legislacao_zoneamento'
+    );
+  }
+
+  // Fallback to old law
+  if (features.length === 0) {
+    features = await consultarWfsGeoSampaLayer(
+      'geoportal:perimetro_zoneamento_revogado_lei13885',
+      `INTERSECTS(ge_poligono,${point})`,
+      'cd_zoneamento_perimetro,tx_zoneamento_perimetro,cd_numero_legislacao_zoneamento,an_legislacao_zoneamento'
+    );
+  }
+
+  if (features.length > 0) {
+    const props = features[0].properties;
+    const sigla = props.cd_zoneamento_perimetro || '-';
+    const descricao = props.tx_zoneamento_perimetro || '';
+    const lei = props.cd_numero_legislacao_zoneamento;
+    const ano = props.an_legislacao_zoneamento;
+    const zonaTexto = descricao ? `${sigla} - ${descricao}` : sigla;
+    return {
+      zona: lei ? `${zonaTexto} (Lei ${lei}/${ano})` : zonaTexto,
+      coefAprov: 'Consultar tabela da lei de zoneamento',
+      gabarito: 'Consultar tabela da lei de zoneamento'
+    };
+  }
+
   return {
-    zona: 'Consultar GeoSampa - Camada de Zoneamento',
-    coefAprov: 'Varia conforme zona',
-    gabarito: 'Varia conforme zona'
+    zona: 'Não encontrado',
+    coefAprov: '-',
+    gabarito: '-'
   };
 }
 
@@ -443,7 +484,7 @@ async function buscarDadosInfraestrutura(coordenadas) {
     };
   } catch (erro) {
     return {
-      metroProximo: `Erro ao buscar dados de metrô`,
+      metroProximo: `Erro: ${erro.message}`,
       metroDistancia: '-'
     };
   }
