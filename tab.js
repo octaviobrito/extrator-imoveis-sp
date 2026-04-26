@@ -456,41 +456,63 @@ async function buscarDadosMercado(endereco, coordenadas) {
   };
 }
 
-// Buscar estação de metrô mais próxima via Overpass API
-async function buscarDadosInfraestrutura(coordenadas) {
-  try {
-    const query = `[out:json][timeout:10];node["railway"="station"]["station"="subway"](around:2000,${coordenadas.lat},${coordenadas.lon});out body;`;
-    const resp = await chrome.runtime.sendMessage({
-      action: 'fetchPost',
-      url: 'https://overpass-api.de/api/interpreter',
-      body: `data=${encodeURIComponent(query)}`
-    });
-    if (!resp.success) throw new Error(resp.error);
-    const data = resp.data;
+// Find closest station from a GeoSampa feature array (coordinates in UTM)
+function encontrarEstacaoMaisProxima(features, utmEasting, utmNorthing) {
+  let closest = null;
+  let minDist = Infinity;
+  for (const f of features) {
+    const coords = f.geometry?.coordinates;
+    if (!coords) continue;
+    const dx = coords[0] - utmEasting;
+    const dy = coords[1] - utmNorthing;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < minDist) { minDist = d; closest = f; }
+  }
+  if (!closest) return null;
+  return {
+    nome: closest.properties.nm_estacao_metro_trem,
+    linha: closest.properties.nm_linha_metro_trem,
+    distancia: minDist
+  };
+}
 
-    if (data.elements && data.elements.length > 0) {
-      let closest = null;
-      let minDist = Infinity;
-      for (const el of data.elements) {
-        const d = calcularDistancia(coordenadas.lat, coordenadas.lon, el.lat, el.lon);
-        if (d < minDist) { minDist = d; closest = el; }
-      }
-      return {
-        metroProximo: closest.tags?.name || 'Estação sem nome',
-        metroDistancia: `${minDist.toFixed(0)} metros`
-      };
+// Buscar metrô e trem mais próximos via GeoSampa WFS
+async function buscarDadosInfraestrutura(coordenadas) {
+  const utm = latLonToUTM23S(coordenadas.lat, coordenadas.lon);
+  const point = `POINT(${utm.easting.toFixed(2)} ${utm.northing.toFixed(2)})`;
+  const props = 'nm_estacao_metro_trem,nm_linha_metro_trem,ge_ponto';
+  const result = {
+    metroProximo: '-', metroDistancia: '-',
+    tremProximo: '-', tremDistancia: '-'
+  };
+
+  try {
+    const [metroFeatures, tremFeatures] = await Promise.all([
+      consultarWfsGeoSampaLayer('geoportal:estacao_metro', `DWITHIN(ge_ponto,${point},5000,meters)`, props),
+      consultarWfsGeoSampaLayer('geoportal:estacao_trem', `DWITHIN(ge_ponto,${point},5000,meters)`, props)
+    ]);
+
+    const metro = encontrarEstacaoMaisProxima(metroFeatures, utm.easting, utm.northing);
+    if (metro) {
+      result.metroProximo = `${metro.nome} (Linha ${metro.linha})`;
+      result.metroDistancia = `${metro.distancia.toFixed(0)} metros`;
+    } else {
+      result.metroProximo = 'Nenhuma estação próxima (5km)';
     }
 
-    return {
-      metroProximo: 'Nenhuma estação próxima (raio de 2km)',
-      metroDistancia: '-'
-    };
+    const trem = encontrarEstacaoMaisProxima(tremFeatures, utm.easting, utm.northing);
+    if (trem) {
+      result.tremProximo = `${trem.nome} (Linha ${trem.linha})`;
+      result.tremDistancia = `${trem.distancia.toFixed(0)} metros`;
+    } else {
+      result.tremProximo = 'Nenhuma estação próxima (5km)';
+    }
   } catch (erro) {
-    return {
-      metroProximo: `Erro: ${erro.message}`,
-      metroDistancia: '-'
-    };
+    result.metroProximo = `Erro: ${erro.message}`;
+    result.tremProximo = `Erro: ${erro.message}`;
   }
+
+  return result;
 }
 
 function calcularDistancia(lat1, lon1, lat2, lon2) {
@@ -543,6 +565,8 @@ function exibirResultados(dados) {
 
   document.getElementById('metro-proximo').textContent = dados.infraestrutura?.metroProximo || '-';
   document.getElementById('metro-distancia').textContent = dados.infraestrutura?.metroDistancia || '-';
+  document.getElementById('trem-proximo').textContent = dados.infraestrutura?.tremProximo || '-';
+  document.getElementById('trem-distancia').textContent = dados.infraestrutura?.tremDistancia || '-';
 
   resultadosDiv.classList.remove('hidden');
 }
