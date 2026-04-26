@@ -212,10 +212,10 @@ async function consultarWfsGeoSampa(cqlFilter) {
 }
 
 // Generic WFS query to any GeoSampa layer
-async function consultarWfsGeoSampaLayer(typeName, cqlFilter, propertyName) {
+async function consultarWfsGeoSampaLayer(typeName, cqlFilter, propertyName, count = 1) {
   let wfsUrl = `http://wfs.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/ows`
     + `?service=WFS&version=2.0.0&request=GetFeature`
-    + `&typeName=${typeName}&count=1`
+    + `&typeName=${typeName}&count=${count}`
     + `&outputFormat=application/json&srsName=EPSG:31983`
     + `&CQL_FILTER=${encodeURIComponent(cqlFilter)}`;
   if (propertyName) {
@@ -488,8 +488,8 @@ async function buscarDadosInfraestrutura(coordenadas) {
 
   try {
     const [metroFeatures, tremFeatures] = await Promise.all([
-      consultarWfsGeoSampaLayer('geoportal:estacao_metro', `DWITHIN(ge_ponto,${point},5000,meters)`, props),
-      consultarWfsGeoSampaLayer('geoportal:estacao_trem', `DWITHIN(ge_ponto,${point},5000,meters)`, props)
+      consultarWfsGeoSampaLayer('geoportal:estacao_metro', `DWITHIN(ge_ponto,${point},5000,meters)`, props, 10),
+      consultarWfsGeoSampaLayer('geoportal:estacao_trem', `DWITHIN(ge_ponto,${point},5000,meters)`, props, 10)
     ]);
 
     const metro = encontrarEstacaoMaisProxima(metroFeatures, utm.easting, utm.northing);
