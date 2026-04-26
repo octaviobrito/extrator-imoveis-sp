@@ -64,14 +64,3 @@ async function fetchExternalData(url) {
     throw error;
   }
 }
-
-// Gerenciamento de CORS (se necessário)
-chrome.webRequest?.onBeforeSendHeaders?.addListener(
-  (details) => {
-    const headers = details.requestHeaders || [];
-    headers.push({ name: 'Origin', value: 'chrome-extension://' + chrome.runtime.id });
-    return { requestHeaders: headers };
-  },
-  { urls: ['<all_urls>'] },
-  ['blocking', 'requestHeaders']
-);

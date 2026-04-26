@@ -39,9 +39,11 @@ async function buscarDados() {
     // Coordinate-dependent queries only run if geocoding succeeded
     if (coordenadas) {
       promises.push(
-        buscarDadosZoneamento(coordenadas),
-        buscarDadosMercado(endereco, coordenadas),
-        buscarDadosInfraestrutura(coordenadas)
+        buscarDadosZoneamento(coordenadas),        // index 1
+        buscarDadosMercado(endereco, coordenadas),  // index 2
+        buscarDadosInfraestrutura(coordenadas),     // index 3
+        buscarSubprefeitura(coordenadas),           // index 4
+        buscarCartorio(coordenadas)                 // index 5
       );
     }
     const results = await Promise.allSettled(promises);
@@ -65,7 +67,9 @@ async function buscarDados() {
       proprietario: proprietarioData,
       zoneamento: coordenadas && results[1]?.status === 'fulfilled' ? results[1].value : null,
       mercado: coordenadas && results[2]?.status === 'fulfilled' ? results[2].value : null,
-      infraestrutura: coordenadas && results[3]?.status === 'fulfilled' ? results[3].value : null
+      infraestrutura: coordenadas && results[3]?.status === 'fulfilled' ? results[3].value : null,
+      subprefeitura: coordenadas && results[4]?.status === 'fulfilled' ? results[4].value : '-',
+      cartorio: coordenadas && results[5]?.status === 'fulfilled' ? results[5].value : { cartorio: '-', endereco: '-' }
     });
 
     esconderLoading();
@@ -213,6 +217,55 @@ async function consultarWfsGeoSampa(cqlFilter) {
   return data.features || [];
 }
 
+// Generic WFS query to any GeoSampa layer (with propertyName to reduce payload)
+async function consultarWfsGeoSampaLayer(typeName, cqlFilter, propertyName) {
+  let wfsUrl = `http://wfs.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/ows`
+    + `?service=WFS&version=2.0.0&request=GetFeature`
+    + `&typeName=${typeName}&count=1`
+    + `&outputFormat=application/json&srsName=EPSG:31983`
+    + `&CQL_FILTER=${encodeURIComponent(cqlFilter)}`;
+  if (propertyName) {
+    wfsUrl += `&propertyName=${encodeURIComponent(propertyName)}`;
+  }
+  const response = await fetch(wfsUrl);
+  const data = await response.json();
+  return data.features || [];
+}
+
+// Buscar subprefeitura via GeoSampa WFS spatial query
+async function buscarSubprefeitura(coordenadas) {
+  const utm = latLonToUTM23S(coordenadas.lat, coordenadas.lon);
+  const cql = `INTERSECTS(ge_poligono,POINT(${utm.easting.toFixed(2)} ${utm.northing.toFixed(2)}))`;
+  const features = await consultarWfsGeoSampaLayer(
+    'geoportal:subprefeitura', cql, 'nm_subprefeitura,sg_subprefeitura'
+  );
+  if (features.length > 0) {
+    const props = features[0].properties;
+    return props.nm_subprefeitura || props.sg_subprefeitura || '-';
+  }
+  return '-';
+}
+
+// Buscar cartório de registro de imóveis via GeoSampa WFS spatial query
+async function buscarCartorio(coordenadas) {
+  const utm = latLonToUTM23S(coordenadas.lat, coordenadas.lon);
+  const cql = `INTERSECTS(ge_poligono,POINT(${utm.easting.toFixed(2)} ${utm.northing.toFixed(2)}))`;
+  const features = await consultarWfsGeoSampaLayer(
+    'geoportal:cartorio_registro_imovel', cql, 'cd_numero_cartorio,nm_endereco_cartorio'
+  );
+  if (features.length > 0) {
+    const props = features[0].properties;
+    const num = props.cd_numero_cartorio;
+    if (num) {
+      return {
+        cartorio: `${num} Registro de Imóveis de São Paulo`,
+        endereco: props.nm_endereco_cartorio || '-'
+      };
+    }
+  }
+  return { cartorio: '-', endereco: '-' };
+}
+
 // Extract lot data from a GeoJSON feature
 function extrairDadosLote(props) {
   const setor = props.cd_setor_fiscal || '';
@@ -313,8 +366,8 @@ async function buscarProprietario(sql) {
 
   const baseUrl = 'https://www3.prefeitura.sp.gov.br/sf8663/formsinternet/principal.aspx';
 
-  // Step 1: GET page to obtain ASP.NET tokens
-  const getResp = await fetch(baseUrl);
+  // Step 1: GET page to obtain ASP.NET tokens (credentials needed for session cookie)
+  const getResp = await fetch(baseUrl, { credentials: 'include' });
   const getHtml = await getResp.text();
 
   const viewState = (getHtml.match(/name="__VIEWSTATE"[^>]*value="([^"]*)"/) || [])[1] || '';
@@ -340,7 +393,8 @@ async function buscarProprietario(sql) {
   const postResp = await fetch(baseUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formData.toString()
+    body: formData.toString(),
+    credentials: 'include'
   });
   const postHtml = await postResp.text();
 
@@ -398,42 +452,35 @@ async function buscarDadosInfraestrutura(coordenadas) {
   // Poderia usar API do Google Places ou Overpass API (OpenStreetMap)
   
   try {
-    // Usando Overpass API para buscar estações de metrô
-    const query = `
-      [out:json];
-      (
-        node["railway"="station"]["station"="subway"](around:2000,${coordenadas.lat},${coordenadas.lon});
-      );
-      out body;
-    `;
-    
+    const query = `[out:json][timeout:10];node["railway"="station"]["station"="subway"](around:2000,${coordenadas.lat},${coordenadas.lon});out body;`;
     const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
     const response = await fetch(url);
+    if (!response.ok) throw new Error(`Overpass HTTP ${response.status}`);
     const data = await response.json();
-    
+
     if (data.elements && data.elements.length > 0) {
-      const estacaoProxima = data.elements[0];
-      const distancia = calcularDistancia(
-        coordenadas.lat, 
-        coordenadas.lon, 
-        estacaoProxima.lat, 
-        estacaoProxima.lon
-      );
-      
+      // Find the closest station
+      let closest = null;
+      let minDist = Infinity;
+      for (const el of data.elements) {
+        const d = calcularDistancia(coordenadas.lat, coordenadas.lon, el.lat, el.lon);
+        if (d < minDist) { minDist = d; closest = el; }
+      }
+
       return {
-        metroProximo: estacaoProxima.tags.name || 'Estação sem nome',
-        metroDistancia: `${distancia.toFixed(0)} metros`
+        metroProximo: closest.tags?.name || 'Estação sem nome',
+        metroDistancia: `${minDist.toFixed(0)} metros`
       };
     }
-    
+
     return {
       metroProximo: 'Nenhuma estação próxima (raio de 2km)',
       metroDistancia: '-'
     };
-    
+
   } catch (erro) {
     return {
-      metroProximo: 'Erro ao buscar',
+      metroProximo: 'Erro ao buscar dados de metrô',
       metroDistancia: '-'
     };
   }
@@ -458,10 +505,11 @@ function exibirResultados(dados) {
   document.getElementById('cep').textContent = dados.geoSampa?.cep || '-';
   document.getElementById('bairro').textContent = dados.geoSampa?.bairro || '-';
   document.getElementById('distrito').textContent = dados.geoSampa?.distrito || '-';
-  document.getElementById('subprefeitura').textContent = dados.geoSampa?.subprefeitura || '-';
+  document.getElementById('subprefeitura').textContent = dados.subprefeitura || dados.geoSampa?.subprefeitura || '-';
   document.getElementById('sql').textContent = dados.geoSampa?.sql || '-';
   document.getElementById('proprietario').textContent = dados.proprietario?.proprietario || '-';
   document.getElementById('compromissario').textContent = dados.proprietario?.compromissario || '-';
+  document.getElementById('cartorio').textContent = dados.cartorio?.cartorio || '-';
 
   // IPTU
   document.getElementById('valor-venal').textContent = dados.iptu?.valorVenal || '-';
