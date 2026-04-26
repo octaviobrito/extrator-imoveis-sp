@@ -460,13 +460,13 @@ async function buscarDadosMercado(endereco, coordenadas) {
 async function buscarDadosInfraestrutura(coordenadas) {
   try {
     const query = `[out:json][timeout:10];node["railway"="station"]["station"="subway"](around:2000,${coordenadas.lat},${coordenadas.lon});out body;`;
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    const resp = await chrome.runtime.sendMessage({
+      action: 'fetchPost',
+      url: 'https://overpass-api.de/api/interpreter',
       body: `data=${encodeURIComponent(query)}`
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    if (!resp.success) throw new Error(resp.error);
+    const data = resp.data;
 
     if (data.elements && data.elements.length > 0) {
       let closest = null;

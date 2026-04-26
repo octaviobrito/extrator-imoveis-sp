@@ -20,7 +20,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     fetchExternalData(request.url)
       .then(data => sendResponse({ success: true, data }))
       .catch(error => sendResponse({ success: false, error: error.message }));
-    return true; // Mantém o canal aberto para resposta assíncrona
+    return true;
+  }
+
+  if (request.action === 'fetchPost') {
+    fetchPostData(request.url, request.body)
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
   }
   
   // Cache de requisições
@@ -40,7 +47,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Função auxiliar para fazer requisições externas
+async function fetchPostData(url, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return await response.json();
+}
+
 async function fetchExternalData(url) {
   try {
     const response = await fetch(url, {
