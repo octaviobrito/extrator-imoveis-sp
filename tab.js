@@ -32,31 +32,37 @@ async function buscarDados() {
   limparResultados();
 
   try {
-    // 1. Geocodificar endereço (non-fatal)
-    let coordenadas = null;
-    try {
-      coordenadas = await geocodificarEndereco(endereco);
-    } catch (e) {
-      // Geocoding failed — GeoSampa name+number query still works
+    // 1. Geocodificar + buscar lote em paralelo
+    const [geoResult, geoSampaResult] = await Promise.allSettled([
+      geocodificarEndereco(endereco),
+      buscarDadosGeoSampa(endereco, null)
+    ]);
+
+    let coordenadas = geoResult.status === 'fulfilled' ? geoResult.value : null;
+    const geoSampaData = geoSampaResult.status === 'fulfilled' ? geoSampaResult.value : null;
+
+    // Prefer GeoSampa lote centroid over Nominatim (more accurate for SP addresses)
+    if (geoSampaData?.centroid) {
+      coordenadas = {
+        lat: geoSampaData.centroid.lat,
+        lon: geoSampaData.centroid.lon,
+        display_name: coordenadas?.display_name || endereco
+      };
     }
 
-    // 2. Buscar dados em paralelo
-    const promises = [
-      buscarDadosGeoSampa(endereco, coordenadas),  // index 0
-    ];
+    // 2. Buscar dados espaciais em paralelo (usando coordenadas precisas do lote)
+    const dadosIPTU = buscarDadosIPTU(geoSampaData);
+    const spatialPromises = [];
     if (coordenadas) {
-      promises.push(
-        buscarDadosZoneamento(coordenadas),          // index 1
-        buscarDadosMercado(endereco, coordenadas),   // index 2
-        buscarDadosInfraestrutura(coordenadas),      // index 3
-        buscarSubprefeitura(coordenadas),            // index 4
-        buscarCartorio(coordenadas)                  // index 5
+      spatialPromises.push(
+        buscarDadosZoneamento(coordenadas),          // index 0
+        buscarDadosMercado(endereco, coordenadas),   // index 1
+        buscarDadosInfraestrutura(coordenadas),      // index 2
+        buscarSubprefeitura(coordenadas),            // index 3
+        buscarCartorio(coordenadas)                  // index 4
       );
     }
-    const results = await Promise.allSettled(promises);
-
-    const geoSampaData = results[0].status === 'fulfilled' ? results[0].value : null;
-    const dadosIPTU = buscarDadosIPTU(geoSampaData);
+    const spatialResults = await Promise.allSettled(spatialPromises);
 
     // 3. Fetch owner data using the SQL code
     let proprietarioData = null;
@@ -67,7 +73,7 @@ async function buscarDados() {
     }
 
     // 4. Buscar matrícula (cache local → scraping → link manual)
-    const cartorioData = coordenadas && results[5]?.status === 'fulfilled' ? results[5].value : { cartorio: '-', endereco: '-' };
+    const cartorioData = coordenadas && spatialResults[4]?.status === 'fulfilled' ? spatialResults[4].value : { cartorio: '-', endereco: '-' };
     let matriculaData = null;
     try {
       matriculaData = await buscarMatricula(geoSampaData?.sql, endereco, cartorioData);
@@ -81,10 +87,10 @@ async function buscarDados() {
       geoSampa: geoSampaData,
       iptu: dadosIPTU,
       proprietario: proprietarioData,
-      zoneamento: coordenadas && results[1]?.status === 'fulfilled' ? results[1].value : null,
-      mercado: coordenadas && results[2]?.status === 'fulfilled' ? results[2].value : null,
-      infraestrutura: coordenadas && results[3]?.status === 'fulfilled' ? results[3].value : null,
-      subprefeitura: coordenadas && results[4]?.status === 'fulfilled' ? results[4].value : '-',
+      zoneamento: coordenadas && spatialResults[0]?.status === 'fulfilled' ? spatialResults[0].value : null,
+      mercado: coordenadas && spatialResults[1]?.status === 'fulfilled' ? spatialResults[1].value : null,
+      infraestrutura: coordenadas && spatialResults[2]?.status === 'fulfilled' ? spatialResults[2].value : null,
+      subprefeitura: coordenadas && spatialResults[3]?.status === 'fulfilled' ? spatialResults[3].value : '-',
       cartorio: cartorioData,
       matricula: matriculaData
     });
@@ -168,7 +174,8 @@ async function buscarDadosGeoSampa(endereco, coordenadas) {
     logradouro: cepData?.logradouro || '-',
     areaTerreno: lote?.areaTerreno || null,
     areaConstruida: lote?.areaConstruida || null,
-    tipoUso: lote?.tipoUso || null
+    tipoUso: lote?.tipoUso || null,
+    centroid: lote?.centroid || null
   };
 }
 
@@ -288,13 +295,31 @@ function extrairDadosLote(props) {
   };
 }
 
+function centroidFromGeometry(geometry) {
+  if (!geometry || !geometry.coordinates) return null;
+  let coords = [];
+  if (geometry.type === 'Polygon') {
+    coords = geometry.coordinates[0];
+  } else if (geometry.type === 'MultiPolygon') {
+    coords = geometry.coordinates[0][0];
+  } else if (geometry.type === 'Point') {
+    return { lat: geometry.coordinates[1], lon: geometry.coordinates[0] };
+  }
+  if (coords.length === 0) return null;
+  let sumLon = 0, sumLat = 0;
+  for (const c of coords) { sumLon += c[0]; sumLat += c[1]; }
+  return { lat: sumLat / coords.length, lon: sumLon / coords.length };
+}
+
 async function buscarLoteGeoSampa(endereco, coordenadas) {
   const { palavras, numero } = extrairLogradouroNumero(endereco);
   if (palavras && numero) {
     const cqlByName = `nm_logradouro_completo LIKE '%${palavras}%' AND cd_numero_porta='${numero}'`;
     const features = await consultarWfsGeoSampa(cqlByName);
     if (features.length > 0) {
-      return extrairDadosLote(features[0].properties);
+      const dados = extrairDadosLote(features[0].properties);
+      dados.centroid = centroidFromGeometry(features[0].geometry);
+      return dados;
     }
   }
 
@@ -304,7 +329,9 @@ async function buscarLoteGeoSampa(endereco, coordenadas) {
     const cqlByCoord = `DWITHIN(ge_poligono,POINT(${utm.easting.toFixed(2)} ${utm.northing.toFixed(2)}),50,meters)`;
     const features = await consultarWfsGeoSampa(cqlByCoord);
     if (features.length > 0) {
-      return extrairDadosLote(features[0].properties);
+      const dados = extrairDadosLote(features[0].properties);
+      dados.centroid = centroidFromGeometry(features[0].geometry);
+      return dados;
     }
   }
 
