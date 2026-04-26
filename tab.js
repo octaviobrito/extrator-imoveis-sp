@@ -540,23 +540,23 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
 
 // URLs dos cartórios de SP para consulta manual
 const CARTORIOS_URL = {
-  '1º': 'https://www.1risp.com.br',
-  '2º': 'https://www.2risp.com.br',
-  '3º': 'https://www.3risp.com.br',
+  '1º': 'https://www.primeirosp.com.br',
+  '2º': 'https://www.2risp.com.br/?pG=X19jb25zdWx0YV9pbmRpY2Fkb3JfcmVhbF9jYXJ0b29u',
+  '3º': 'https://3risp.com.br',
   '4º': 'https://www.4risp.com.br/cartorio/consultas/ri/indicador/ri-consulta-indicador',
   '5º': 'https://www.quinto.com.br/consulte/pesquisa-de-matricula',
   '6º': 'https://www.6risp.com.br',
   '7º': 'https://www.7risp.com.br',
   '8º': 'https://www.oitavo.com.br/consultaeletronica/imovel',
-  '9º': 'https://www.9risp.com.br',
+  '9º': 'https://www.9risp.com.br/?pG=X19yZWFs',
   '10º': 'https://www.10risp.com.br',
-  '11º': 'https://www.11risp.com.br',
-  '12º': 'https://www.12risp.com.br',
-  '13º': 'https://www.13risp.com.br',
-  '14º': 'https://www.14risp.com.br',
-  '15º': 'https://www.15risp.com.br',
-  '16º': 'https://www.16risp.com.br',
-  '17º': 'https://www.17risp.com.br',
+  '11º': 'https://web.11ri.com.br',
+  '12º': 'https://www.12ri.com.br',
+  '13º': 'https://www.13registro.com.br',
+  '14º': 'https://www.14ri.com.br',
+  '15º': 'https://www.decimoquinto.com.br',
+  '16º': 'https://www.16ri.com.br',
+  '17º': 'https://17risp.com.br',
   '18º': 'https://www.18risp.com.br'
 };
 
