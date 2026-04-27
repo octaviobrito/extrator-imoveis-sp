@@ -56,6 +56,30 @@ fileIPTU.addEventListener('change', async (e) => {
   }
 })();
 
+// Google Places API key
+const apikeyInput = document.getElementById('apikey-input');
+const apikeyStatus = document.getElementById('apikey-status');
+const btnSaveApikey = document.getElementById('btn-save-apikey');
+
+btnSaveApikey.addEventListener('click', async () => {
+  const key = apikeyInput.value.trim();
+  if (!key) return;
+  await salvarApiKey(key);
+  apikeyStatus.textContent = 'Google Places: configurado';
+  apikeyStatus.className = 'import-status loaded';
+  apikeyInput.value = '';
+  apikeyInput.placeholder = 'Salvo';
+});
+
+(async () => {
+  const key = await carregarApiKey();
+  if (key) {
+    apikeyStatus.textContent = 'Google Places: configurado';
+    apikeyStatus.className = 'import-status loaded';
+    apikeyInput.placeholder = 'Key salva (cole nova para substituir)';
+  }
+})();
+
 // Auto-search if address passed via URL parameter
 const params = new URLSearchParams(window.location.search);
 const enderecoParam = params.get('endereco');
@@ -115,7 +139,8 @@ async function buscarDados() {
         buscarDadosMercado(endereco, coordenadas),   // index 1
         buscarDadosInfraestrutura(coordenadas),      // index 2
         buscarSubprefeitura(coordenadas),            // index 3
-        buscarCartorio(coordenadas)                  // index 4
+        buscarCartorio(coordenadas),                 // index 4
+        buscarPOIsGoogle(coordenadas)                // index 5
       );
     }
     const [spatialResults, dadosIPTU] = await Promise.all([
@@ -152,7 +177,8 @@ async function buscarDados() {
       infraestrutura: coordenadas && spatialResults[2]?.status === 'fulfilled' ? spatialResults[2].value : null,
       subprefeitura: coordenadas && spatialResults[3]?.status === 'fulfilled' ? spatialResults[3].value : '-',
       cartorio: cartorioData,
-      matricula: matriculaData
+      matricula: matriculaData,
+      pois: coordenadas && spatialResults[5]?.status === 'fulfilled' ? spatialResults[5].value : null
     });
 
     esconderLoading();
@@ -699,6 +725,81 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// === GOOGLE PLACES API (POIs) ===
+
+function salvarApiKey(key) {
+  return new Promise(resolve => {
+    chrome.storage.local.set({ googleApiKey: key }, resolve);
+  });
+}
+
+function carregarApiKey() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['googleApiKey'], result => resolve(result.googleApiKey || null));
+  });
+}
+
+async function buscarPOIsGoogle(coordenadas) {
+  const apiKey = await carregarApiKey();
+  if (!apiKey) return null;
+
+  const tipos = [
+    { type: 'supermarket', key: 'supermercado' },
+    { type: 'pharmacy', key: 'farmacia' },
+    { type: 'shopping_mall', key: 'shopping' }
+  ];
+
+  const results = await Promise.allSettled(
+    tipos.map(t => buscarPOIGoogle(coordenadas, t.type, apiKey))
+  );
+
+  const data = {};
+  tipos.forEach((t, i) => {
+    const r = results[i].status === 'fulfilled' ? results[i].value : null;
+    data[t.key + 'Proximo'] = r ? r.nome : '-';
+    data[t.key + 'Distancia'] = r ? `${r.distancia} metros` : '-';
+  });
+  return data;
+}
+
+async function buscarPOIGoogle(coordenadas, type, apiKey) {
+  const resp = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': 'places.displayName,places.location'
+    },
+    body: JSON.stringify({
+      includedTypes: [type],
+      maxResultCount: 1,
+      rankPreference: 'DISTANCE',
+      locationRestriction: {
+        circle: {
+          center: { latitude: coordenadas.lat, longitude: coordenadas.lon },
+          radius: 2000.0
+        }
+      },
+      languageCode: 'pt-BR'
+    })
+  });
+
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  if (!data.places || data.places.length === 0) return null;
+
+  const place = data.places[0];
+  const dist = calcularDistancia(
+    coordenadas.lat, coordenadas.lon,
+    place.location.latitude, place.location.longitude
+  );
+
+  return {
+    nome: place.displayName.text,
+    distancia: Math.round(dist)
+  };
+}
+
 // === IPTU LOCAL INDEX (IndexedDB) ===
 
 function abrirIPTUDB() {
@@ -1030,6 +1131,13 @@ function exibirResultados(dados) {
   document.getElementById('metro-distancia').textContent = dados.infraestrutura?.metroDistancia || '-';
   document.getElementById('trem-proximo').textContent = dados.infraestrutura?.tremProximo || '-';
   document.getElementById('trem-distancia').textContent = dados.infraestrutura?.tremDistancia || '-';
+
+  document.getElementById('supermercado-proximo').textContent = dados.pois?.supermercadoProximo || '-';
+  document.getElementById('supermercado-distancia').textContent = dados.pois?.supermercadoDistancia || '-';
+  document.getElementById('farmacia-proxima').textContent = dados.pois?.farmaciaProximo || '-';
+  document.getElementById('farmacia-distancia').textContent = dados.pois?.farmaciaDistancia || '-';
+  document.getElementById('shopping-proximo').textContent = dados.pois?.shoppingProximo || '-';
+  document.getElementById('shopping-distancia').textContent = dados.pois?.shoppingDistancia || '-';
 
   resultadosDiv.classList.remove('hidden');
 }

@@ -29,6 +29,12 @@
       <div id="import-progress" class="hidden" style="margin-top:8px; font-size:13px; color:#718096;">Importando...</div>
     </div>
 
+    <div id="apikey-section" class="import-section">
+      <div id="apikey-status" class="import-status">Google Places: não configurado</div>
+      <input type="password" id="apikey-input" placeholder="API key do Google" style="width:220px; padding:6px 10px; font-size:13px; border:1px solid #e2e8f0; border-radius:4px;">
+      <button id="btn-save-apikey" class="btn-secondary">Salvar</button>
+    </div>
+
     <div id="loading" class="loading hidden">
       <div class="spinner"></div>
       <p>Buscando informações...</p>
@@ -92,12 +98,24 @@
       </div>
 
       <div class="card">
-        <h2>Infraestrutura</h2>
+        <h2>Infraestrutura e Transporte</h2>
         <div id="dados-infraestrutura">
           <p><strong>Metrô mais próximo:</strong> <span id="metro-proximo">-</span></p>
           <p><strong>Distância:</strong> <span id="metro-distancia">-</span></p>
           <p><strong>Trem (CPTM) mais próximo:</strong> <span id="trem-proximo">-</span></p>
           <p><strong>Distância:</strong> <span id="trem-distancia">-</span></p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Comércio e Serviços</h2>
+        <div id="dados-pois">
+          <p><strong>Supermercado mais próximo:</strong> <span id="supermercado-proximo">-</span></p>
+          <p><strong>Distância:</strong> <span id="supermercado-distancia">-</span></p>
+          <p><strong>Farmácia mais próxima:</strong> <span id="farmacia-proxima">-</span></p>
+          <p><strong>Distância:</strong> <span id="farmacia-distancia">-</span></p>
+          <p><strong>Shopping mais próximo:</strong> <span id="shopping-proximo">-</span></p>
+          <p><strong>Distância:</strong> <span id="shopping-distancia">-</span></p>
         </div>
       </div>
 
