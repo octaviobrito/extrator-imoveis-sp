@@ -22,6 +22,13 @@
       <button id="buscar">Buscar Dados</button>
     </div>
 
+    <div id="import-section" class="import-section">
+      <div id="import-status" class="import-status"></div>
+      <button id="btn-import" class="btn-secondary">Importar dados IPTU (JSON)</button>
+      <input type="file" id="file-iptu" accept=".json" style="display:none">
+      <div id="import-progress" class="hidden" style="margin-top:8px; font-size:13px; color:#718096;">Importando...</div>
+    </div>
+
     <div id="loading" class="loading hidden">
       <div class="spinner"></div>
       <p>Buscando informações...</p>

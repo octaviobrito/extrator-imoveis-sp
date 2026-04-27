@@ -11,6 +11,51 @@ enderecoInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') buscarDados();
 });
 
+// Import IPTU data
+const btnImport = document.getElementById('btn-import');
+const fileIPTU = document.getElementById('file-iptu');
+const importStatus = document.getElementById('import-status');
+const importProgress = document.getElementById('import-progress');
+
+btnImport.addEventListener('click', () => fileIPTU.click());
+fileIPTU.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  importProgress.classList.remove('hidden');
+  btnImport.disabled = true;
+  try {
+    const result = await importarIPTUJSON(file);
+    importStatus.textContent = `Dados IPTU carregados: ${result.enderecos.toLocaleString()} endereços, ${result.unidades.toLocaleString()} unidades`;
+    importStatus.className = 'import-status loaded';
+    importProgress.classList.add('hidden');
+  } catch (err) {
+    importStatus.textContent = `Erro ao importar: ${err.message}`;
+    importProgress.classList.add('hidden');
+  }
+  btnImport.disabled = false;
+  fileIPTU.value = '';
+});
+
+(async () => {
+  try {
+    const loaded = await iptuIndexCarregado();
+    if (loaded) {
+      const db = await abrirIPTUDB();
+      const tx = db.transaction('meta', 'readonly');
+      const store = tx.objectStore('meta');
+      const enderecos = await new Promise(r => { const req = store.get('totalRegistros'); req.onsuccess = () => r(req.result); });
+      const unidades = await new Promise(r => { const req = store.get('totalUnidades'); req.onsuccess = () => r(req.result); });
+      db.close();
+      importStatus.textContent = `Dados IPTU carregados: ${(enderecos || 0).toLocaleString()} endereços, ${(unidades || 0).toLocaleString()} unidades`;
+      importStatus.className = 'import-status loaded';
+    } else {
+      importStatus.textContent = 'Dados IPTU não importados — busca de unidades em condomínios indisponível';
+    }
+  } catch (e) {
+    importStatus.textContent = 'Dados IPTU não importados';
+  }
+})();
+
 // Auto-search if address passed via URL parameter
 const params = new URLSearchParams(window.location.search);
 const enderecoParam = params.get('endereco');
@@ -62,7 +107,7 @@ async function buscarDados() {
     }
 
     // 2. Buscar dados espaciais em paralelo (usando coordenadas precisas do lote)
-    const dadosIPTU = buscarDadosIPTU(geoSampaData);
+    const dadosIPTUPromise = buscarDadosIPTU(geoSampaData);
     const spatialPromises = [];
     if (coordenadas) {
       spatialPromises.push(
@@ -73,12 +118,16 @@ async function buscarDados() {
         buscarCartorio(coordenadas)                  // index 4
       );
     }
-    const spatialResults = await Promise.allSettled(spatialPromises);
+    const [spatialResults, dadosIPTU] = await Promise.all([
+      Promise.allSettled(spatialPromises),
+      dadosIPTUPromise
+    ]);
 
-    // 3. Fetch owner data using the SQL code
+    // 3. Fetch owner data using the SQL code (prefer unit SQL if found)
+    const sqlParaProprietario = dadosIPTU?.unidadeEncontrada?.sql || geoSampaData?.sql;
     let proprietarioData = null;
     try {
-      proprietarioData = await buscarProprietario(geoSampaData?.sql);
+      proprietarioData = await buscarProprietario(sqlParaProprietario);
     } catch (e) {
       proprietarioData = { proprietario: `Erro: ${e.message}`, compromissario: '-' };
     }
@@ -418,15 +467,41 @@ async function buscarCepViaCEP(endereco) {
   return { cep: 'Não encontrado', bairro: '-', logradouro: '-' };
 }
 
-function buscarDadosIPTU(dadosGeoSampa) {
+async function buscarDadosIPTU(dadosGeoSampa) {
   const sqlDisponivel = dadosGeoSampa?.sql && dadosGeoSampa.sql !== '-';
   const isCondo = dadosGeoSampa?.isCondominio;
   const compl = dadosGeoSampa?.complemento;
+
+  if (isCondo && compl && dadosGeoSampa?.setor && dadosGeoSampa?.quadra) {
+    const unidade = await buscarUnidadeIPTU(dadosGeoSampa.setor, dadosGeoSampa.quadra, compl);
+    if (unidade && !unidade.semMatch) {
+      return {
+        valorVenal: 'Use o SQL da unidade acima no portal',
+        areaTerreno: dadosGeoSampa?.areaTerreno || '-',
+        areaConstruida: unidade.areaConstruida || '-',
+        anoConstrucao: '-',
+        tipoUso: unidade.tipoUso || '-',
+        unidadeEncontrada: unidade
+      };
+    }
+    if (unidade?.semMatch) {
+      return {
+        valorVenal: `Condomínio com ${unidade.totalUnidades} unidades. Não encontrou "${compl.texto}" exato — consulte o portal IPTU.`,
+        areaTerreno: dadosGeoSampa?.areaTerreno || '-',
+        areaConstruida: '-',
+        anoConstrucao: '-',
+        tipoUso: `Condomínio — unidade: ${compl.texto}`,
+        unidadeNaoEncontrada: true,
+        totalUnidades: unidade.totalUnidades
+      };
+    }
+  }
+
   let valorVenalMsg = sqlDisponivel
     ? 'Use o SQL acima no portal'
     : 'Requer SQL do imóvel';
   if (isCondo && compl) {
-    valorVenalMsg = `Condomínio detectado (${compl.texto}). O SQL acima é do condomínio, não da unidade. Consulte o portal IPTU para localizar o SQL da unidade.`;
+    valorVenalMsg = `Condomínio detectado (${compl.texto}). Importe os dados IPTU para consulta automática, ou acesse o portal IPTU.`;
   }
   return {
     valorVenal: valorVenalMsg,
@@ -624,6 +699,135 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// === IPTU LOCAL INDEX (IndexedDB) ===
+
+function abrirIPTUDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('iptu_condominios', 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('indice')) {
+        db.createObjectStore('indice');
+      }
+      if (!db.objectStoreNames.contains('meta')) {
+        db.createObjectStore('meta');
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function buscarUnidadeIPTU(setor, quadra, complemento) {
+  if (!setor || !quadra || !complemento) return null;
+  const chave = `${setor}.${quadra}`;
+  try {
+    const db = await abrirIPTUDB();
+    const tx = db.transaction('indice', 'readonly');
+    const store = tx.objectStore('indice');
+    const dados = await new Promise((resolve, reject) => {
+      const req = store.get(chave);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    if (!dados || !dados.unidades) return null;
+
+    const match = matchComplemento(dados.unidades, complemento);
+    if (match) {
+      return {
+        sql: `${setor}.${quadra}.${match.l}-${match.d}`,
+        complemento: match.c,
+        areaConstruida: match.a ? `${match.a} m²` : null,
+        tipoUso: match.u || null,
+        logradouro: dados.logradouro,
+        numero: dados.numero,
+        totalUnidades: dados.unidades.length
+      };
+    }
+    return { semMatch: true, totalUnidades: dados.unidades.length, chave };
+  } catch (e) {
+    return null;
+  }
+}
+
+function matchComplemento(unidades, parsed) {
+  for (const u of unidades) {
+    const c = (u.c || '').toUpperCase();
+    const blocoCSV = c.match(/\bBL\.?\s*(\w+)/)?.[1];
+    const aptoCSV = c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1];
+
+    if (parsed.bloco && parsed.apartamento) {
+      if (blocoCSV === parsed.bloco && aptoCSV === parsed.apartamento) return u;
+    } else if (parsed.bloco && !parsed.apartamento) {
+      if (blocoCSV === parsed.bloco) return u;
+    } else if (!parsed.bloco && parsed.apartamento) {
+      if (aptoCSV === parsed.apartamento) return u;
+    }
+  }
+  return null;
+}
+
+async function iptuIndexCarregado() {
+  try {
+    const db = await abrirIPTUDB();
+    const tx = db.transaction('meta', 'readonly');
+    const store = tx.objectStore('meta');
+    const count = await new Promise((resolve, reject) => {
+      const req = store.get('totalRegistros');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return count > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function importarIPTUJSON(file) {
+  const text = await file.text();
+  const dados = JSON.parse(text);
+  const chaves = Object.keys(dados);
+  if (chaves.length === 0) throw new Error('Arquivo JSON vazio');
+
+  const db = await abrirIPTUDB();
+  const batchSize = 500;
+  let total = 0;
+
+  for (let i = 0; i < chaves.length; i += batchSize) {
+    const batch = chaves.slice(i, i + batchSize);
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('indice', 'readwrite');
+      const store = tx.objectStore('indice');
+      for (const chave of batch) {
+        store.put(dados[chave], chave);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    total += batch.length;
+  }
+
+  let totalUnidades = 0;
+  for (const chave of chaves) {
+    totalUnidades += (dados[chave].unidades || []).length;
+  }
+
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction('meta', 'readwrite');
+    const store = tx.objectStore('meta');
+    store.put(chaves.length, 'totalRegistros');
+    store.put(totalUnidades, 'totalUnidades');
+    store.put(new Date().toISOString(), 'dataImportacao');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+
+  db.close();
+  return { enderecos: chaves.length, unidades: totalUnidades };
+}
+
 // === MATRÍCULA: cache local + scraping ===
 
 // URLs dos cartórios de SP para consulta manual
@@ -717,7 +921,11 @@ function exibirResultados(dados) {
   document.getElementById('subprefeitura').textContent = dados.subprefeitura || '-';
   const sqlEl = document.getElementById('sql');
   const sqlText = dados.geoSampa?.sql || '-';
-  if (dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
+  const unidade = dados.iptu?.unidadeEncontrada;
+
+  if (unidade) {
+    sqlEl.textContent = unidade.sql;
+  } else if (dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
     sqlEl.textContent = `${sqlText} (SQL do condomínio)`;
   } else {
     sqlEl.textContent = sqlText;
@@ -725,24 +933,34 @@ function exibirResultados(dados) {
 
   // Condo notice
   const condoNotice = document.getElementById('condo-notice');
+  const condoLink = document.getElementById('condo-iptu-link');
   if (condoNotice) {
-    if (dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
+    if (unidade) {
+      condoNotice.innerHTML = `Unidade encontrada: <strong>${unidade.complemento}</strong> (${unidade.totalUnidades} unidades no condomínio)`;
+      condoNotice.style.display = 'block';
+      condoNotice.className = 'condo-notice condo-found';
+      if (condoLink) condoLink.style.display = 'none';
+    } else if (dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
       const compl = dados.geoSampa.complemento;
       const setor = dados.geoSampa.setor || '';
       const quadra = dados.geoSampa.quadra || '';
-      let msg = `Este endereço é um condomínio. Você buscou: ${compl.texto}. `;
-      msg += `Para encontrar o SQL da unidade específica, acesse o portal IPTU `;
-      msg += `e consulte pelo setor ${setor} e quadra ${quadra}.`;
-      condoNotice.textContent = msg;
+      if (dados.iptu?.unidadeNaoEncontrada) {
+        condoNotice.textContent = `Condomínio encontrado (${dados.iptu?.totalUnidades || '?'} unidades), mas não foi possível localizar "${compl.texto}" exato. Verifique o formato do complemento.`;
+      } else {
+        let msg = `Este endereço é um condomínio. Você buscou: ${compl.texto}. `;
+        msg += `Importe os dados IPTU (botão acima) para consulta automática, `;
+        msg += `ou acesse o portal IPTU pelo setor ${setor} e quadra ${quadra}.`;
+        condoNotice.textContent = msg;
+      }
       condoNotice.style.display = 'block';
-
-      const condoLink = document.getElementById('condo-iptu-link');
+      condoNotice.className = 'condo-notice';
       if (condoLink) {
         condoLink.href = 'https://iptu.prefeitura.sp.gov.br/';
         condoLink.style.display = 'inline';
       }
     } else {
       condoNotice.style.display = 'none';
+      if (condoLink) condoLink.style.display = 'none';
     }
   }
   document.getElementById('proprietario').textContent = dados.proprietario?.proprietario || '-';

@@ -82,6 +82,46 @@ button:active {
   transform: scale(0.98);
 }
 
+.import-section {
+  margin-bottom: 16px;
+  background: white;
+  padding: 14px 24px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.import-status {
+  font-size: 13px;
+  color: #718096;
+  flex: 1;
+  min-width: 150px;
+}
+
+.import-status.loaded {
+  color: #276749;
+}
+
+.btn-secondary {
+  padding: 8px 16px;
+  background: #edf2f7;
+  color: #4a5568;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+  width: auto;
+}
+
+.btn-secondary:hover {
+  background: #e2e8f0;
+}
+
 .loading {
   text-align: center;
   padding: 40px;
@@ -164,6 +204,12 @@ button:active {
   font-size: 13px;
   line-height: 1.5;
   margin: 8px 0;
+}
+
+.condo-notice.condo-found {
+  background: #f0fff4;
+  border-color: #68d391;
+  color: #276749;
 }
 
 .condo-link {

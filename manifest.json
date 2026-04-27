@@ -2,10 +2,11 @@
   "manifest_version": 3,
   "name": "Extrator de Dados de Imóveis SP",
   "description": "Extraia dados completos de imóveis em São Paulo inserindo apenas o endereço",
-  "version": "1.7",
+  "version": "1.8",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://*/*",
