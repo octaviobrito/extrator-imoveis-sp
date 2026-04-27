@@ -27,12 +27,12 @@ def normalizar_logradouro(nome):
 def extrair_sql(numero_contribuinte):
     """Extrai setor, quadra, lote, digito do número do contribuinte."""
     s = str(numero_contribuinte).strip()
-    # Formato com pontos e traço: 141.057.0001-3
+    # Formato com pontos: 141.057.0001-3
     m = re.match(r'^(\d{3})\.(\d{3})\.(\d{4})-?(\d)?$', s)
     if m:
         return m.group(1), m.group(2), m.group(3), m.group(4) or '0'
-    # Formato só números: 14105700013 (11 dígitos) ou 1410570001 (10 dígitos)
-    m = re.match(r'^(\d{3})(\d{3})(\d{4})(\d)?$', s)
+    # Formato sem pontos: 0010030001-4 ou 00100300014 ou 0010030001
+    m = re.match(r'^(\d{3})(\d{3})(\d{4})-?(\d)?$', s)
     if m:
         return m.group(1), m.group(2), m.group(3), m.group(4) or '0'
     return None, None, None, None
@@ -84,7 +84,11 @@ def main():
             complemento = (row.get('COMPLEMENTO DO IMOVEL') or '').strip()
             num_condo = (row.get('NUMERO DO CONDOMINIO') or '').strip()
 
-            # Pular registros sem complemento (não são unidades de condomínio)
+            # Pular registros que não são unidades de condomínio:
+            # - NUMERO DO CONDOMINIO deve ser diferente de "00-0" e "0"
+            # - COMPLEMENTO deve existir (ex: "BL 7 AP 124")
+            if not num_condo or num_condo in ('00-0', '0', '00', '000'):
+                continue
             if not complemento:
                 continue
 
