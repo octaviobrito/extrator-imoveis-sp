@@ -111,19 +111,10 @@ def main():
             chave = f"{setor}.{quadra}"
 
             if chave not in indice:
-                indice[chave] = {
-                    "logradouro": logradouro,
-                    "numero": numero_imovel,
-                    "unidades": []
-                }
+                indice[chave] = []
 
-            indice[chave]["unidades"].append({
-                "c": complemento,       # complemento (ex: "BL 7 AP 124")
-                "l": lote,              # lote (ex: "0001")
-                "d": digito,            # dígito verificador
-                "a": area_construida,   # área construída
-                "u": tipo_uso           # tipo de uso
-            })
+            # Array compacto: [complemento, lote, digito, area_construida]
+            indice[chave].append([complemento, lote, digito, area_construida])
 
             condos += 1
 
@@ -140,19 +131,7 @@ def main():
 
     tamanho = os.path.getsize(arquivo_saida)
     print(f"\nArquivo gerado: {arquivo_saida} ({tamanho / 1024 / 1024:.1f} MB)")
-
-    if tamanho > 50 * 1024 * 1024:
-        print("\nO arquivo é grande. Gerando versão reduzida sem tipo de uso...")
-        for chave in indice:
-            for u in indice[chave]["unidades"]:
-                del u["u"]
-        arquivo_saida2 = 'iptu_condominios_slim.json'
-        with open(arquivo_saida2, 'w', encoding='utf-8') as f:
-            json.dump(indice, f, ensure_ascii=False, separators=(',', ':'))
-        tamanho2 = os.path.getsize(arquivo_saida2)
-        print(f"Versão reduzida: {arquivo_saida2} ({tamanho2 / 1024 / 1024:.1f} MB)")
-
-    print("\nPronto! Agora cole o arquivo JSON gerado na conversa.")
+    print("\nPronto! Importe o arquivo na extensão pelo botão 'Importar dados IPTU'.")
 
 if __name__ == '__main__':
     main()

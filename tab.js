@@ -480,7 +480,7 @@ async function buscarDadosIPTU(dadosGeoSampa) {
         areaTerreno: dadosGeoSampa?.areaTerreno || '-',
         areaConstruida: unidade.areaConstruida || '-',
         anoConstrucao: '-',
-        tipoUso: unidade.tipoUso || '-',
+        tipoUso: 'Condomínio',
         unidadeEncontrada: unidade
       };
     }
@@ -731,21 +731,19 @@ async function buscarUnidadeIPTU(setor, quadra, complemento) {
       req.onerror = () => reject(req.error);
     });
     db.close();
-    if (!dados || !dados.unidades) return null;
+    if (!dados || !Array.isArray(dados) || dados.length === 0) return null;
 
-    const match = matchComplemento(dados.unidades, complemento);
+    // Array format: [complemento, lote, digito, area]
+    const match = matchComplemento(dados, complemento);
     if (match) {
       return {
-        sql: `${setor}.${quadra}.${match.l}-${match.d}`,
-        complemento: match.c,
-        areaConstruida: match.a ? `${match.a} m²` : null,
-        tipoUso: match.u || null,
-        logradouro: dados.logradouro,
-        numero: dados.numero,
-        totalUnidades: dados.unidades.length
+        sql: `${setor}.${quadra}.${match[1]}-${match[2]}`,
+        complemento: match[0],
+        areaConstruida: match[3] ? `${match[3]} m²` : null,
+        totalUnidades: dados.length
       };
     }
-    return { semMatch: true, totalUnidades: dados.unidades.length, chave };
+    return { semMatch: true, totalUnidades: dados.length, chave };
   } catch (e) {
     return null;
   }
@@ -753,7 +751,7 @@ async function buscarUnidadeIPTU(setor, quadra, complemento) {
 
 function matchComplemento(unidades, parsed) {
   for (const u of unidades) {
-    const c = (u.c || '').toUpperCase();
+    const c = (u[0] || '').toUpperCase();
     const blocoCSV = c.match(/\bBL\.?\s*(\w+)/)?.[1];
     const aptoCSV = c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1];
 
@@ -811,7 +809,7 @@ async function importarIPTUJSON(file) {
 
   let totalUnidades = 0;
   for (const chave of chaves) {
-    totalUnidades += (dados[chave].unidades || []).length;
+    totalUnidades += Array.isArray(dados[chave]) ? dados[chave].length : 0;
   }
 
   await new Promise((resolve, reject) => {
