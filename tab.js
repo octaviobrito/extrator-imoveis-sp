@@ -32,9 +32,12 @@ async function buscarDados() {
   limparResultados();
 
   try {
+    // Strip bloco/apartamento complement for geocoding and lookup
+    const enderecoBase = stripComplemento(endereco);
+
     // 1. Geocodificar + buscar lote por nome em paralelo
     const [geoResult, geoSampaResult] = await Promise.allSettled([
-      geocodificarEndereco(endereco),
+      geocodificarEndereco(enderecoBase),
       buscarDadosGeoSampa(endereco, null)
     ]);
 
@@ -136,8 +139,31 @@ function removerAcentos(str) {
   return str.normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+function parseComplemento(endereco) {
+  const blocoRe = /\b(?:bl\.?o?c?o?|blc\.?|bl\.?)\s*(\d+)/i;
+  const aptoRe = /\b(?:a(?:p(?:t(?:o|\.)?|\.)?|partamento)\.?)\s*(\d+)/i;
+  const blocoMatch = endereco.match(blocoRe);
+  const aptoMatch = endereco.match(aptoRe);
+  if (!blocoMatch && !aptoMatch) return null;
+  return {
+    bloco: blocoMatch ? blocoMatch[1] : null,
+    apartamento: aptoMatch ? aptoMatch[1] : null,
+    texto: [blocoMatch ? `Bloco ${blocoMatch[1]}` : '', aptoMatch ? `Apto ${aptoMatch[1]}` : ''].filter(Boolean).join(', ')
+  };
+}
+
+function stripComplemento(endereco) {
+  return endereco
+    .replace(/,?\s*\b(?:bl\.?o?c?o?|blc\.?|bl\.?)\s*\d+/i, '')
+    .replace(/,?\s*\b(?:a(?:p(?:t(?:o|\.)?|\.)?|partamento)\.?)\s*\d+/i, '')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*$/, '')
+    .trim();
+}
+
 function extrairLogradouroNumero(endereco) {
-  const partes = endereco.split(',');
+  const limpo = stripComplemento(endereco);
+  const partes = limpo.split(',');
   const ruaPart = partes[0].trim();
   const numPart = partes.length > 1 ? partes[1].trim() : '';
 
@@ -166,16 +192,22 @@ function extrairLogradouroNumero(endereco) {
 
 // Buscar dados cadastrais via GeoSampa WFS + CEP via ViaCEP
 async function buscarDadosGeoSampa(endereco, coordenadas) {
+  const complemento = parseComplemento(endereco);
+  const enderecoBase = stripComplemento(endereco);
+
   const [geoSampaResult, viaCepResult] = await Promise.allSettled([
-    buscarLoteGeoSampa(endereco, coordenadas),
-    buscarCepViaCEP(endereco)
+    buscarLoteGeoSampa(enderecoBase, coordenadas),
+    buscarCepViaCEP(enderecoBase)
   ]);
 
   const lote = geoSampaResult.status === 'fulfilled' ? geoSampaResult.value : null;
   const cepData = viaCepResult.status === 'fulfilled' ? viaCepResult.value : null;
+  const isCondominio = lote?.tipoUso === 'Condomínio' || lote?.cdLote === '0000';
 
   return {
     sql: lote?.sql || '-',
+    setor: lote?.setor || null,
+    quadra: lote?.quadra || null,
     distrito: cepData?.bairro || '-',
     cep: cepData?.cep || '-',
     bairro: cepData?.bairro || '-',
@@ -183,7 +215,9 @@ async function buscarDadosGeoSampa(endereco, coordenadas) {
     areaTerreno: lote?.areaTerreno || null,
     areaConstruida: lote?.areaConstruida || null,
     tipoUso: lote?.tipoUso || null,
-    centroid: lote?.centroid || null
+    centroid: lote?.centroid || null,
+    isCondominio,
+    complemento
   };
 }
 
@@ -297,6 +331,9 @@ function extrairDadosLote(props) {
 
   return {
     sql,
+    setor,
+    quadra,
+    cdLote: lote,
     areaTerreno: props.qt_area_terreno != null ? `${parseFloat(props.qt_area_terreno).toFixed(2)} m²` : null,
     areaConstruida: props.qt_area_construida != null ? `${parseFloat(props.qt_area_construida).toFixed(2)} m²` : null,
     tipoUso: props.dc_tipo_uso_imovel || null
@@ -329,6 +366,16 @@ async function buscarLoteGeoSampa(endereco, coordenadas) {
       dados.centroid = centroidFromGeometry(features[0].geometry);
       return dados;
     }
+    // Condos often store cd_numero_porta as '0 2100 S/N' instead of '2100'
+    const cqlCondo = `nm_logradouro_completo LIKE '%${palavras}%' AND cd_numero_porta LIKE '%${numero}%' AND dc_tipo_uso_imovel='Condomínio'`;
+    try {
+      const condoFeatures = await consultarWfsGeoSampa(cqlCondo);
+      if (condoFeatures.length > 0) {
+        const dados = extrairDadosLote(condoFeatures[0].properties);
+        dados.centroid = centroidFromGeometry(condoFeatures[0].geometry);
+        return dados;
+      }
+    } catch (e) { /* WAF may block - fall through to spatial */ }
   }
 
   if (coordenadas) {
@@ -373,14 +420,20 @@ async function buscarCepViaCEP(endereco) {
 
 function buscarDadosIPTU(dadosGeoSampa) {
   const sqlDisponivel = dadosGeoSampa?.sql && dadosGeoSampa.sql !== '-';
+  const isCondo = dadosGeoSampa?.isCondominio;
+  const compl = dadosGeoSampa?.complemento;
+  let valorVenalMsg = sqlDisponivel
+    ? 'Use o SQL acima no portal'
+    : 'Requer SQL do imóvel';
+  if (isCondo && compl) {
+    valorVenalMsg = `Condomínio detectado (${compl.texto}). O SQL acima é do condomínio, não da unidade. Consulte o portal IPTU para localizar o SQL da unidade.`;
+  }
   return {
-    valorVenal: sqlDisponivel
-      ? 'Use o SQL acima no portal'
-      : 'Requer SQL do imóvel',
+    valorVenal: valorVenalMsg,
     areaTerreno: dadosGeoSampa?.areaTerreno || '-',
     areaConstruida: dadosGeoSampa?.areaConstruida || '-',
     anoConstrucao: '-',
-    tipoUso: dadosGeoSampa?.tipoUso || '-'
+    tipoUso: isCondo && compl ? `Condomínio — unidade: ${compl.texto}` : (dadosGeoSampa?.tipoUso || '-')
   };
 }
 
@@ -662,7 +715,36 @@ function exibirResultados(dados) {
   document.getElementById('bairro').textContent = dados.geoSampa?.bairro || '-';
   document.getElementById('distrito').textContent = dados.geoSampa?.distrito || '-';
   document.getElementById('subprefeitura').textContent = dados.subprefeitura || '-';
-  document.getElementById('sql').textContent = dados.geoSampa?.sql || '-';
+  const sqlEl = document.getElementById('sql');
+  const sqlText = dados.geoSampa?.sql || '-';
+  if (dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
+    sqlEl.textContent = `${sqlText} (SQL do condomínio)`;
+  } else {
+    sqlEl.textContent = sqlText;
+  }
+
+  // Condo notice
+  const condoNotice = document.getElementById('condo-notice');
+  if (condoNotice) {
+    if (dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
+      const compl = dados.geoSampa.complemento;
+      const setor = dados.geoSampa.setor || '';
+      const quadra = dados.geoSampa.quadra || '';
+      let msg = `Este endereço é um condomínio. Você buscou: ${compl.texto}. `;
+      msg += `Para encontrar o SQL da unidade específica, acesse o portal IPTU `;
+      msg += `e consulte pelo setor ${setor} e quadra ${quadra}.`;
+      condoNotice.textContent = msg;
+      condoNotice.style.display = 'block';
+
+      const condoLink = document.getElementById('condo-iptu-link');
+      if (condoLink) {
+        condoLink.href = 'https://iptu.prefeitura.sp.gov.br/';
+        condoLink.style.display = 'inline';
+      }
+    } else {
+      condoNotice.style.display = 'none';
+    }
+  }
   document.getElementById('proprietario').textContent = dados.proprietario?.proprietario || '-';
   document.getElementById('compromissario').textContent = dados.proprietario?.compromissario || '-';
   document.getElementById('cartorio').textContent = dados.cartorio?.cartorio || '-';

@@ -155,6 +155,26 @@ button:active {
   font-weight: 500;
 }
 
+.condo-notice {
+  background: #fffbeb;
+  border: 1px solid #f6e05e;
+  color: #744210;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+
+.condo-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #2b6cb0;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .footer {
   text-align: center;
   margin-top: 24px;
