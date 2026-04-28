@@ -396,10 +396,10 @@ async function buscarCartorio(coordenadas) {
 }
 
 function extrairDadosLote(props) {
-  const setor = props.cd_setor_fiscal || '';
-  const quadra = props.cd_quadra_fiscal || '';
-  const lote = props.cd_lote || '';
-  const digito = props.cd_digito_sql || '';
+  const setor = String(props.cd_setor_fiscal || '');
+  const quadra = String(props.cd_quadra_fiscal || '');
+  const lote = String(props.cd_lote || '');
+  const digito = String(props.cd_digito_sql || '');
 
   const sql = (setor && quadra && lote)
     ? `${setor}.${quadra}.${lote}${digito && digito !== '0' ? '-' + digito : ''}`
@@ -839,8 +839,8 @@ function abrirIPTUDB() {
 
 async function buscarUnidadeIPTU(setor, quadra, complemento) {
   if (!setor || !quadra || !complemento) return null;
-  const setorPad = setor.padStart(3, '0');
-  const quadraPad = quadra.padStart(3, '0');
+  const setorPad = String(setor).padStart(3, '0');
+  const quadraPad = String(quadra).padStart(3, '0');
   const chave = `${setorPad}.${quadraPad}`;
   try {
     const db = await abrirIPTUDB();
@@ -949,7 +949,12 @@ async function importarIPTUJSON(file) {
 
   let totalUnidades = 0;
   for (const chave of chaves) {
-    totalUnidades += Array.isArray(dados[chave]) ? dados[chave].length : 0;
+    const v = dados[chave];
+    if (Array.isArray(v)) {
+      totalUnidades += v.length;
+    } else if (v?.unidades && Array.isArray(v.unidades)) {
+      totalUnidades += v.unidades.length;
+    }
   }
 
   await new Promise((resolve, reject) => {
