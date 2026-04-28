@@ -839,7 +839,9 @@ function abrirIPTUDB() {
 
 async function buscarUnidadeIPTU(setor, quadra, complemento) {
   if (!setor || !quadra || !complemento) return null;
-  const chave = `${setor}.${quadra}`;
+  const setorPad = setor.padStart(3, '0');
+  const quadraPad = quadra.padStart(3, '0');
+  const chave = `${setorPad}.${quadraPad}`;
   try {
     const db = await abrirIPTUDB();
     const tx = db.transaction('indice', 'readonly');
@@ -850,36 +852,55 @@ async function buscarUnidadeIPTU(setor, quadra, complemento) {
       req.onerror = () => reject(req.error);
     });
     db.close();
-    if (!dados || !Array.isArray(dados) || dados.length === 0) return null;
 
-    // Array format: [complemento, lote, digito, area]
-    const match = matchComplemento(dados, complemento);
+    // Support both array format (new) and object format (old import)
+    let unidades;
+    if (Array.isArray(dados)) {
+      unidades = dados;
+    } else if (dados?.unidades && Array.isArray(dados.unidades)) {
+      unidades = dados.unidades;
+    } else {
+      return null;
+    }
+    if (unidades.length === 0) return null;
+
+    const match = matchComplemento(unidades, complemento);
     if (match) {
+      const compl = Array.isArray(match) ? match[0] : match.c;
+      const lote = Array.isArray(match) ? match[1] : match.l;
+      const digito = Array.isArray(match) ? match[2] : match.d;
+      const area = Array.isArray(match) ? match[3] : match.a;
       return {
-        sql: `${setor}.${quadra}.${match[1]}-${match[2]}`,
-        complemento: match[0],
-        areaConstruida: match[3] ? `${match[3]} m²` : null,
-        totalUnidades: dados.length
+        sql: `${setorPad}.${quadraPad}.${lote}-${digito}`,
+        complemento: compl,
+        areaConstruida: area ? `${area} m²` : null,
+        totalUnidades: unidades.length
       };
     }
-    return { semMatch: true, totalUnidades: dados.length, chave };
+    return { semMatch: true, totalUnidades: unidades.length, chave };
   } catch (e) {
     return null;
   }
 }
 
 function matchComplemento(unidades, parsed) {
+  const parsedBloco = parsed.bloco ? parseInt(parsed.bloco, 10) : null;
+  const parsedApto = parsed.apartamento ? parseInt(parsed.apartamento, 10) : null;
+
   for (const u of unidades) {
-    const c = (u[0] || '').toUpperCase();
+    const c = (Array.isArray(u) ? u[0] : u.c || '').toUpperCase();
     const blocoCSV = c.match(/\bBL\.?\s*(\w+)/)?.[1];
     const aptoCSV = c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1];
 
-    if (parsed.bloco && parsed.apartamento) {
-      if (blocoCSV === parsed.bloco && aptoCSV === parsed.apartamento) return u;
-    } else if (parsed.bloco && !parsed.apartamento) {
-      if (blocoCSV === parsed.bloco) return u;
-    } else if (!parsed.bloco && parsed.apartamento) {
-      if (aptoCSV === parsed.apartamento) return u;
+    const csvBloco = blocoCSV ? parseInt(blocoCSV, 10) : null;
+    const csvApto = aptoCSV ? parseInt(aptoCSV, 10) : null;
+
+    if (parsedBloco !== null && parsedApto !== null) {
+      if (csvBloco === parsedBloco && csvApto === parsedApto) return u;
+    } else if (parsedBloco !== null && parsedApto === null) {
+      if (csvBloco === parsedBloco) return u;
+    } else if (parsedBloco === null && parsedApto !== null) {
+      if (csvApto === parsedApto) return u;
     }
   }
   return null;
