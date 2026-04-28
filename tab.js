@@ -131,7 +131,8 @@ async function buscarDados() {
     }
 
     // 2. Buscar dados espaciais em paralelo (usando coordenadas precisas do lote)
-    const dadosIPTUPromise = buscarDadosIPTU(geoSampaData);
+    const { numero: numeroImovel } = extrairLogradouroNumero(enderecoBase);
+    const dadosIPTUPromise = buscarDadosIPTU(geoSampaData, numeroImovel);
     const spatialPromises = [];
     if (coordenadas) {
       spatialPromises.push(
@@ -511,13 +512,13 @@ async function buscarCepViaCEP(endereco) {
   return { cep: 'Não encontrado', bairro: '-', logradouro: '-' };
 }
 
-async function buscarDadosIPTU(dadosGeoSampa) {
+async function buscarDadosIPTU(dadosGeoSampa, numeroImovel) {
   const sqlDisponivel = dadosGeoSampa?.sql && dadosGeoSampa.sql !== '-';
   const isCondo = dadosGeoSampa?.isCondominio;
   const compl = dadosGeoSampa?.complemento;
 
   if (isCondo && compl && dadosGeoSampa?.setor && dadosGeoSampa?.quadra) {
-    const unidade = await buscarUnidadeIPTU(dadosGeoSampa.setor, dadosGeoSampa.quadra, compl);
+    const unidade = await buscarUnidadeIPTU(dadosGeoSampa.setor, dadosGeoSampa.quadra, compl, numeroImovel);
     if (unidade && !unidade.semMatch) {
       return {
         valorVenal: 'Use o SQL da unidade acima no portal',
@@ -837,7 +838,7 @@ function abrirIPTUDB() {
   });
 }
 
-async function buscarUnidadeIPTU(setor, quadra, complemento) {
+async function buscarUnidadeIPTU(setor, quadra, complemento, numeroImovel) {
   if (!setor || !quadra || !complemento) return null;
   const setorPad = String(setor).padStart(3, '0');
   const quadraPad = String(quadra).padStart(3, '0');
@@ -853,7 +854,6 @@ async function buscarUnidadeIPTU(setor, quadra, complemento) {
     });
     db.close();
 
-    // Support both array format (new) and object format (old import)
     let unidades;
     if (Array.isArray(dados)) {
       unidades = dados;
@@ -864,7 +864,7 @@ async function buscarUnidadeIPTU(setor, quadra, complemento) {
     }
     if (unidades.length === 0) return null;
 
-    const match = matchComplemento(unidades, complemento);
+    const match = matchComplemento(unidades, complemento, numeroImovel);
     if (match) {
       const compl = Array.isArray(match) ? match[0] : match.c;
       const lote = Array.isArray(match) ? match[1] : match.l;
@@ -883,11 +883,21 @@ async function buscarUnidadeIPTU(setor, quadra, complemento) {
   }
 }
 
-function matchComplemento(unidades, parsed) {
+function matchComplemento(unidades, parsed, numeroImovel) {
   const parsedBloco = parsed.bloco ? parseInt(parsed.bloco, 10) : null;
   const parsedApto = parsed.apartamento ? parseInt(parsed.apartamento, 10) : null;
 
-  for (const u of unidades) {
+  // Filter by building number first (index 4 in array format)
+  let candidates = unidades;
+  if (numeroImovel) {
+    const filtered = unidades.filter(u => {
+      const uNum = Array.isArray(u) && u.length > 4 ? String(u[4]) : null;
+      return uNum === String(numeroImovel);
+    });
+    if (filtered.length > 0) candidates = filtered;
+  }
+
+  for (const u of candidates) {
     const c = (Array.isArray(u) ? u[0] : u.c || '').toUpperCase();
     const blocoCSV = c.match(/\bBL\.?\s*(\w+)/)?.[1];
     const aptoCSV = c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1];

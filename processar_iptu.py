@@ -113,8 +113,8 @@ def main():
             if chave not in indice:
                 indice[chave] = []
 
-            # Array compacto: [complemento, lote, digito, area_construida]
-            indice[chave].append([complemento, lote, digito, area_construida])
+            # Array compacto: [complemento, lote, digito, area_construida, numero_imovel]
+            indice[chave].append([complemento, lote, digito, area_construida, numero_imovel])
 
             condos += 1
 
