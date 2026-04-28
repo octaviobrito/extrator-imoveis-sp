@@ -258,11 +258,12 @@ function extrairLogradouroNumero(endereco) {
     .trim();
 
   const todasPalavras = semPrefixo.split(/\s+/).filter(w => w.length > 0);
-  const palavras = todasPalavras.length > 2
+  const palavrasCompletas = todasPalavras.join(' ');
+  const palavrasCurtas = todasPalavras.length > 2
     ? todasPalavras.slice(-2).join(' ')
-    : todasPalavras.join(' ');
+    : palavrasCompletas;
 
-  return { palavras, numero };
+  return { palavras: palavrasCompletas, palavrasCurtas, numero };
 }
 
 // Buscar dados cadastrais via GeoSampa WFS + CEP via ViaCEP
@@ -432,16 +433,33 @@ function centroidFromGeometry(geometry) {
 }
 
 async function buscarLoteGeoSampa(endereco, coordenadas) {
-  const { palavras, numero } = extrairLogradouroNumero(endereco);
+  const { palavras, palavrasCurtas, numero } = extrairLogradouroNumero(endereco);
+
   if (palavras && numero) {
-    const cqlByName = `nm_logradouro_completo LIKE '%${palavras}%' AND cd_numero_porta='${numero}'`;
-    const features = await consultarWfsGeoSampa(cqlByName);
-    if (features.length > 0) {
-      const dados = extrairDadosLote(features[0].properties);
-      dados.centroid = centroidFromGeometry(features[0].geometry);
-      return dados;
+    // 1. Try full street name (most specific)
+    const cqlFull = `nm_logradouro_completo LIKE '%${palavras}%' AND cd_numero_porta='${numero}'`;
+    try {
+      const features = await consultarWfsGeoSampa(cqlFull);
+      if (features.length > 0) {
+        const dados = extrairDadosLote(features[0].properties);
+        dados.centroid = centroidFromGeometry(features[0].geometry);
+        return dados;
+      }
+    } catch (e) { /* WAF may block long queries - try shorter */ }
+
+    // 2. If full name didn't match, try shorter (last 2 words) — only if different
+    if (palavrasCurtas !== palavras) {
+      const cqlShort = `nm_logradouro_completo LIKE '%${palavrasCurtas}%' AND cd_numero_porta='${numero}'`;
+      const featuresShort = await consultarWfsGeoSampa(cqlShort);
+      if (featuresShort.length === 1) {
+        const dados = extrairDadosLote(featuresShort[0].properties);
+        dados.centroid = centroidFromGeometry(featuresShort[0].geometry);
+        return dados;
+      }
+      // Multiple results with short name — ambiguous, skip to spatial
     }
-    // Condos often store cd_numero_porta as '0 2100 S/N' instead of '2100'
+
+    // 3. Condo fallback (cd_numero_porta may be '0 2100 S/N')
     const cqlCondo = `nm_logradouro_completo LIKE '%${palavras}%' AND cd_numero_porta LIKE '%${numero}%' AND dc_tipo_uso_imovel='Condomínio'`;
     try {
       const condoFeatures = await consultarWfsGeoSampa(cqlCondo);
