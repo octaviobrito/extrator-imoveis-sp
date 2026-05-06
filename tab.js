@@ -763,13 +763,13 @@ async function buscarPOIsGoogle(coordenadas) {
   if (!apiKey) return { erro: 'API key não configurada' };
 
   const tipos = [
-    { type: 'supermarket', key: 'supermercado' },
-    { type: 'pharmacy', key: 'farmacia' },
-    { type: 'shopping_mall', key: 'shopping' }
+    { type: 'supermarket', key: 'supermercado', raio: 2000 },
+    { type: 'pharmacy', key: 'farmacia', raio: 2000 },
+    { type: 'shopping_mall', key: 'shopping', raio: 10000 }
   ];
 
   const results = await Promise.allSettled(
-    tipos.map(t => buscarPOIGoogle(coordenadas, t.type, apiKey))
+    tipos.map(t => buscarPOIGoogle(coordenadas, t.type, apiKey, t.raio))
   );
 
   const data = {};
@@ -778,25 +778,30 @@ async function buscarPOIsGoogle(coordenadas) {
     const err = results[i].status === 'rejected' ? results[i].reason?.message : null;
     if (r?.erro) {
       data[t.key + 'Proximo'] = `Erro: ${r.erro}`;
+      data[t.key + 'Endereco'] = '-';
       data[t.key + 'Distancia'] = '-';
     } else if (r) {
       data[t.key + 'Proximo'] = r.nome;
-      data[t.key + 'Distancia'] = `${r.distancia} metros`;
+      data[t.key + 'Endereco'] = r.endereco;
+      data[t.key + 'Distancia'] = r.distancia >= 1000
+        ? `${(r.distancia / 1000).toFixed(1)} km`
+        : `${r.distancia} metros`;
     } else {
       data[t.key + 'Proximo'] = err ? `Erro: ${err}` : 'Não encontrado';
+      data[t.key + 'Endereco'] = '-';
       data[t.key + 'Distancia'] = '-';
     }
   });
   return data;
 }
 
-async function buscarPOIGoogle(coordenadas, type, apiKey) {
+async function buscarPOIGoogle(coordenadas, type, apiKey, raio) {
   const resp = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': 'places.displayName,places.location'
+      'X-Goog-FieldMask': 'places.displayName,places.location,places.formattedAddress'
     },
     body: JSON.stringify({
       includedTypes: [type],
@@ -805,7 +810,7 @@ async function buscarPOIGoogle(coordenadas, type, apiKey) {
       locationRestriction: {
         circle: {
           center: { latitude: coordenadas.lat, longitude: coordenadas.lon },
-          radius: 2000.0
+          radius: raio
         }
       },
       languageCode: 'pt-BR'
@@ -828,6 +833,7 @@ async function buscarPOIGoogle(coordenadas, type, apiKey) {
   );
   return {
     nome: place.displayName?.text || 'Sem nome',
+    endereco: place.formattedAddress || '-',
     distancia: Math.round(dist)
   };
 }
@@ -1200,10 +1206,13 @@ function exibirResultados(dados) {
   document.getElementById('trem-distancia').textContent = dados.infraestrutura?.tremDistancia || '-';
 
   document.getElementById('supermercado-proximo').textContent = dados.pois?.supermercadoProximo || '-';
+  document.getElementById('supermercado-endereco').textContent = dados.pois?.supermercadoEndereco || '-';
   document.getElementById('supermercado-distancia').textContent = dados.pois?.supermercadoDistancia || '-';
   document.getElementById('farmacia-proxima').textContent = dados.pois?.farmaciaProximo || '-';
+  document.getElementById('farmacia-endereco').textContent = dados.pois?.farmaciaEndereco || '-';
   document.getElementById('farmacia-distancia').textContent = dados.pois?.farmaciaDistancia || '-';
   document.getElementById('shopping-proximo').textContent = dados.pois?.shoppingProximo || '-';
+  document.getElementById('shopping-endereco').textContent = dados.pois?.shoppingEndereco || '-';
   document.getElementById('shopping-distancia').textContent = dados.pois?.shoppingDistancia || '-';
 
   resultadosDiv.classList.remove('hidden');
