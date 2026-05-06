@@ -762,40 +762,140 @@ async function buscarPOIsGoogle(coordenadas) {
   const apiKey = await carregarApiKey();
   if (!apiKey) return { erro: 'API key não configurada' };
 
-  const tipos = [
-    { type: 'supermarket', key: 'supermercado', raio: 2000 },
-    { type: 'pharmacy', key: 'farmacia', raio: 2000 },
-    { type: 'shopping_mall', key: 'shopping', raio: 10000 }
-  ];
+  const results = await Promise.allSettled([
+    buscarSupermercadoGoogle(coordenadas, apiKey),
+    buscarPOIGoogle(coordenadas, 'pharmacy', apiKey, 2000, 'DISTANCE', 1),
+    buscarShoppingGoogle(coordenadas, apiKey)
+  ]);
 
-  const results = await Promise.allSettled(
-    tipos.map(t => buscarPOIGoogle(coordenadas, t.type, apiKey, t.raio))
-  );
-
+  const keys = ['supermercado', 'farmacia', 'shopping'];
   const data = {};
-  tipos.forEach((t, i) => {
+  keys.forEach((key, i) => {
     const r = results[i].status === 'fulfilled' ? results[i].value : null;
     const err = results[i].status === 'rejected' ? results[i].reason?.message : null;
     if (r?.erro) {
-      data[t.key + 'Proximo'] = `Erro: ${r.erro}`;
-      data[t.key + 'Endereco'] = '-';
-      data[t.key + 'Distancia'] = '-';
+      data[key + 'Proximo'] = `Erro: ${r.erro}`;
+      data[key + 'Endereco'] = '-';
+      data[key + 'Distancia'] = '-';
     } else if (r) {
-      data[t.key + 'Proximo'] = r.nome;
-      data[t.key + 'Endereco'] = r.endereco;
-      data[t.key + 'Distancia'] = r.distancia >= 1000
+      data[key + 'Proximo'] = r.nome;
+      data[key + 'Endereco'] = r.endereco;
+      data[key + 'Distancia'] = r.distancia >= 1000
         ? `${(r.distancia / 1000).toFixed(1)} km`
         : `${r.distancia} metros`;
     } else {
-      data[t.key + 'Proximo'] = err ? `Erro: ${err}` : 'Não encontrado';
-      data[t.key + 'Endereco'] = '-';
-      data[t.key + 'Distancia'] = '-';
+      data[key + 'Proximo'] = err ? `Erro: ${err}` : 'Não encontrado';
+      data[key + 'Endereco'] = '-';
+      data[key + 'Distancia'] = '-';
     }
   });
   return data;
 }
 
-async function buscarPOIGoogle(coordenadas, type, apiKey, raio) {
+const SUPERMARKET_CHAINS = [
+  'extra', 'pao de acucar', 'pão de açúcar', 'carrefour', 'assai', 'assaí',
+  'atacadao', 'atacadão', 'sonda', 'dia', 'big', 'sam\'s', 'sams club',
+  'makro', 'maxxi', 'enxuto', 'hirota', 'mambo', 'st marche', 'saint marche',
+  'oba', 'nagumo', 'savegnago', 'tenda', 'ricoy', 'semar', 'covabra',
+  'supermercado', 'supermercados', 'hipermercado', 'walmart', 'lopes',
+  'barbosa', 'pastorinho', 'joanin', 'spani', 'swift', 'natural da terra',
+  'emporio', 'empório', 'villarreal', 'mugiatti', 'proença', 'dalben'
+];
+
+async function buscarSupermercadoGoogle(coordenadas, apiKey) {
+  const resp = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': 'places.displayName,places.location,places.formattedAddress'
+    },
+    body: JSON.stringify({
+      includedTypes: ['supermarket'],
+      maxResultCount: 10,
+      rankPreference: 'DISTANCE',
+      locationRestriction: {
+        circle: {
+          center: { latitude: coordenadas.lat, longitude: coordenadas.lon },
+          radius: 3000
+        }
+      },
+      languageCode: 'pt-BR'
+    })
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    return { erro: data?.error?.message || `HTTP ${resp.status}` };
+  }
+  if (!data.places || data.places.length === 0) return null;
+
+  const match = data.places.find(p => {
+    const nome = (p.displayName?.text || '').toLowerCase();
+    return SUPERMARKET_CHAINS.some(chain => nome.includes(chain));
+  });
+
+  const place = match || data.places[0];
+  const dist = calcularDistancia(
+    coordenadas.lat, coordenadas.lon,
+    place.location.latitude, place.location.longitude
+  );
+  return {
+    nome: place.displayName?.text || 'Sem nome',
+    endereco: place.formattedAddress || '-',
+    distancia: Math.round(dist)
+  };
+}
+
+async function buscarShoppingGoogle(coordenadas, apiKey) {
+  const resp = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': 'places.displayName,places.location,places.formattedAddress'
+    },
+    body: JSON.stringify({
+      includedTypes: ['shopping_mall'],
+      maxResultCount: 5,
+      rankPreference: 'POPULARITY',
+      locationRestriction: {
+        circle: {
+          center: { latitude: coordenadas.lat, longitude: coordenadas.lon },
+          radius: 15000
+        }
+      },
+      languageCode: 'pt-BR'
+    })
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    return { erro: data?.error?.message || `HTTP ${resp.status}` };
+  }
+  if (!data.places || data.places.length === 0) return null;
+
+  let best = null;
+  let bestDist = Infinity;
+  for (const place of data.places) {
+    const dist = calcularDistancia(
+      coordenadas.lat, coordenadas.lon,
+      place.location.latitude, place.location.longitude
+    );
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = place;
+    }
+  }
+
+  return {
+    nome: best.displayName?.text || 'Sem nome',
+    endereco: best.formattedAddress || '-',
+    distancia: Math.round(bestDist)
+  };
+}
+
+async function buscarPOIGoogle(coordenadas, type, apiKey, raio, rank, count) {
   const resp = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
     method: 'POST',
     headers: {
@@ -805,8 +905,8 @@ async function buscarPOIGoogle(coordenadas, type, apiKey, raio) {
     },
     body: JSON.stringify({
       includedTypes: [type],
-      maxResultCount: 1,
-      rankPreference: 'DISTANCE',
+      maxResultCount: count || 1,
+      rankPreference: rank || 'DISTANCE',
       locationRestriction: {
         circle: {
           center: { latitude: coordenadas.lat, longitude: coordenadas.lon },
