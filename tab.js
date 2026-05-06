@@ -791,76 +791,45 @@ async function buscarPOIsGoogle(coordenadas) {
 }
 
 async function buscarPOIGoogle(coordenadas, type, apiKey) {
-  // Try Places API (New) first
-  try {
-    const resp = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.displayName,places.location'
+  const resp = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': 'places.displayName,places.location'
+    },
+    body: JSON.stringify({
+      includedTypes: [type],
+      maxResultCount: 1,
+      rankPreference: 'DISTANCE',
+      locationRestriction: {
+        circle: {
+          center: { latitude: coordenadas.lat, longitude: coordenadas.lon },
+          radius: 2000.0
+        }
       },
-      body: JSON.stringify({
-        includedTypes: [type],
-        maxResultCount: 1,
-        rankPreference: 'DISTANCE',
-        locationRestriction: {
-          circle: {
-            center: { latitude: coordenadas.lat, longitude: coordenadas.lon },
-            radius: 2000.0
-          }
-        },
-        languageCode: 'pt-BR'
-      })
-    });
+      languageCode: 'pt-BR'
+    })
+  });
 
-    if (resp.ok) {
-      const data = await resp.json();
-      if (data.places && data.places.length > 0) {
-        const place = data.places[0];
-        const dist = calcularDistancia(
-          coordenadas.lat, coordenadas.lon,
-          place.location.latitude, place.location.longitude
-        );
-        return {
-          nome: place.displayName?.text || place.displayName || 'Sem nome',
-          distancia: Math.round(dist)
-        };
-      }
-      return null;
-    }
+  const data = await resp.json();
 
-    // If New API fails, try legacy endpoint
-    const respBody = await resp.json().catch(() => ({}));
-    console.warn('Places API (New) falhou:', resp.status, respBody);
-  } catch (e) {
-    console.warn('Places API (New) erro:', e.message);
+  if (!resp.ok) {
+    const msg = data?.error?.message || `HTTP ${resp.status}`;
+    return { erro: msg };
   }
 
-  // Fallback: legacy Nearby Search
-  try {
-    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json`
-      + `?location=${coordenadas.lat},${coordenadas.lon}`
-      + `&radius=2000&type=${type}&key=${apiKey}&language=pt-BR`;
-    const resp = await fetch(url);
-    const data = await resp.json();
+  if (!data.places || data.places.length === 0) return null;
 
-    if (data.status === 'OK' && data.results?.length > 0) {
-      const place = data.results[0];
-      const dist = calcularDistancia(
-        coordenadas.lat, coordenadas.lon,
-        place.geometry.location.lat, place.geometry.location.lng
-      );
-      return { nome: place.name, distancia: Math.round(dist) };
-    }
-    if (data.status === 'REQUEST_DENIED') {
-      return { erro: data.error_message || 'API não habilitada' };
-    }
-  } catch (e) {
-    console.warn('Legacy Places API erro:', e.message);
-  }
-
-  return null;
+  const place = data.places[0];
+  const dist = calcularDistancia(
+    coordenadas.lat, coordenadas.lon,
+    place.location.latitude, place.location.longitude
+  );
+  return {
+    nome: place.displayName?.text || 'Sem nome',
+    distancia: Math.round(dist)
+  };
 }
 
 // === IPTU LOCAL INDEX (IndexedDB) ===
