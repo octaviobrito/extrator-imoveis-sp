@@ -121,6 +121,19 @@ async function buscarDados() {
       } catch (e) {}
     }
 
+    // If nothing resolved (no cadastral SQL and no coordinates), the address
+    // could not be found — warn clearly instead of showing an empty result.
+    const semCadastro = !geoSampaData || geoSampaData.sql === '-';
+    if (semCadastro && !coordenadas) {
+      esconderLoading();
+      mostrarErro(
+        `Não foi possível localizar "${enderecoBase}" em São Paulo. ` +
+        `Verifique a grafia da rua e o número — ruas com nomes parecidos ` +
+        `(ex: "Mogumbá" x "Mongubá") ou acentuação incorreta impedem a busca.`
+      );
+      return;
+    }
+
     // Prefer GeoSampa lote centroid over Nominatim (more accurate for SP addresses)
     if (geoSampaData?.centroid) {
       coordenadas = {
