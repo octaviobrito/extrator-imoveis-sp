@@ -231,13 +231,20 @@ function removerAcentos(str) {
 function parseComplemento(endereco) {
   const blocoRe = /\b(?:bl\.?o?c?o?|blc\.?|bl\.?)\s*(\d+)/i;
   const aptoRe = /\b(?:a(?:p(?:t(?:o|\.)?|\.)?|partamento)\.?)\s*(\d+)/i;
+  const casaRe = /\b(?:casa|cs)\.?\s*(\d+)/i;
   const blocoMatch = endereco.match(blocoRe);
   const aptoMatch = endereco.match(aptoRe);
-  if (!blocoMatch && !aptoMatch) return null;
+  const casaMatch = endereco.match(casaRe);
+  if (!blocoMatch && !aptoMatch && !casaMatch) return null;
   return {
     bloco: blocoMatch ? blocoMatch[1] : null,
     apartamento: aptoMatch ? aptoMatch[1] : null,
-    texto: [blocoMatch ? `Bloco ${blocoMatch[1]}` : '', aptoMatch ? `Apto ${aptoMatch[1]}` : ''].filter(Boolean).join(', ')
+    casa: casaMatch ? casaMatch[1] : null,
+    texto: [
+      blocoMatch ? `Bloco ${blocoMatch[1]}` : '',
+      aptoMatch ? `Apto ${aptoMatch[1]}` : '',
+      casaMatch ? `Casa ${casaMatch[1]}` : ''
+    ].filter(Boolean).join(', ')
   };
 }
 
@@ -245,6 +252,7 @@ function stripComplemento(endereco) {
   return endereco
     .replace(/,?\s*\b(?:bl\.?o?c?o?|blc\.?|bl\.?)\s*\d+/i, '')
     .replace(/,?\s*\b(?:a(?:p(?:t(?:o|\.)?|\.)?|partamento)\.?)\s*\d+/i, '')
+    .replace(/,?\s*\b(?:casa|cs)\.?\s*\d+/i, '')
     .replace(/,\s*,/g, ',')
     .replace(/,\s*$/, '')
     .trim();
@@ -1018,6 +1026,7 @@ async function buscarUnidadeIPTU(setor, quadra, complemento, numeroImovel) {
 function matchComplemento(unidades, parsed, numeroImovel) {
   const parsedBloco = parsed.bloco ? parseInt(parsed.bloco, 10) : null;
   const parsedApto = parsed.apartamento ? parseInt(parsed.apartamento, 10) : null;
+  const parsedCasa = parsed.casa ? parseInt(parsed.casa, 10) : null;
 
   // Filter by building number first (index 4 in array format)
   let candidates = unidades;
@@ -1033,9 +1042,21 @@ function matchComplemento(unidades, parsed, numeroImovel) {
     const c = (Array.isArray(u) ? u[0] : u.c || '').toUpperCase();
     const blocoCSV = c.match(/\bBL\.?\s*(\w+)/)?.[1];
     const aptoCSV = c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1];
+    const casaCSV = c.match(/\b(?:CS|CASA)\.?\s*(\w+)/)?.[1];
 
     const csvBloco = blocoCSV ? parseInt(blocoCSV, 10) : null;
     const csvApto = aptoCSV ? parseInt(aptoCSV, 10) : null;
+    const csvCasa = casaCSV ? parseInt(casaCSV, 10) : null;
+
+    // Casa (condomínio horizontal / vila) — pode vir com ou sem bloco
+    if (parsedCasa !== null) {
+      if (parsedBloco !== null) {
+        if (csvCasa === parsedCasa && csvBloco === parsedBloco) return u;
+      } else if (csvCasa === parsedCasa) {
+        return u;
+      }
+      continue;
+    }
 
     if (parsedBloco !== null && parsedApto !== null) {
       if (csvBloco === parsedBloco && csvApto === parsedApto) return u;
