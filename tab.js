@@ -540,7 +540,7 @@ async function buscarDadosIPTU(dadosGeoSampa, numeroImovel) {
 
   if (isCondo && compl && dadosGeoSampa?.setor && dadosGeoSampa?.quadra) {
     const unidade = await buscarUnidadeIPTU(dadosGeoSampa.setor, dadosGeoSampa.quadra, compl, numeroImovel);
-    if (unidade && !unidade.semMatch) {
+    if (unidade?.sql) {
       return {
         valorVenal: 'Use o SQL da unidade acima no portal',
         areaTerreno: dadosGeoSampa?.areaTerreno || '-',
@@ -550,9 +550,21 @@ async function buscarDadosIPTU(dadosGeoSampa, numeroImovel) {
         unidadeEncontrada: unidade
       };
     }
-    if (unidade?.semMatch) {
+    if (unidade?.chaveAusente) {
       return {
-        valorVenal: `Condomínio com ${unidade.totalUnidades} unidades. Não encontrou "${compl.texto}" exato — consulte o portal IPTU.`,
+        valorVenal: `Nenhuma unidade cadastrada para ${unidade.chave} no índice importado. Reprocesse e reimporte o CSV do IPTU.`,
+        areaTerreno: dadosGeoSampa?.areaTerreno || '-',
+        areaConstruida: '-',
+        anoConstrucao: '-',
+        tipoUso: `Condomínio — unidade: ${compl.texto} (sem dados no índice)`,
+        unidadeNaoEncontrada: true,
+        totalUnidades: 0
+      };
+    }
+    if (unidade?.semMatch) {
+      const amostra = (unidade.amostras || []).join(' | ') || '—';
+      return {
+        valorVenal: `Condomínio com ${unidade.totalUnidades} unidades. Não encontrou "${compl.texto}" exato. Complementos no índice: ${amostra}`,
         areaTerreno: dadosGeoSampa?.areaTerreno || '-',
         areaConstruida: '-',
         anoConstrucao: '-',
@@ -1000,9 +1012,10 @@ async function buscarUnidadeIPTU(setor, quadra, complemento, numeroImovel) {
     } else if (dados?.unidades && Array.isArray(dados.unidades)) {
       unidades = dados.unidades;
     } else {
-      return null;
+      // Chave (setor.quadra) não existe no índice importado
+      return { chaveAusente: true, chave, totalUnidades: 0 };
     }
-    if (unidades.length === 0) return null;
+    if (unidades.length === 0) return { chaveAusente: true, chave, totalUnidades: 0 };
 
     const match = matchComplemento(unidades, complemento, numeroImovel);
     if (match) {
@@ -1017,7 +1030,12 @@ async function buscarUnidadeIPTU(setor, quadra, complemento, numeroImovel) {
         totalUnidades: unidades.length
       };
     }
-    return { semMatch: true, totalUnidades: unidades.length, chave };
+    // Amostra dos complementos disponíveis para diagnóstico
+    const amostras = unidades
+      .slice(0, 8)
+      .map(u => (Array.isArray(u) ? u[0] : u.c) || '')
+      .filter(Boolean);
+    return { semMatch: true, totalUnidades: unidades.length, chave, amostras };
   } catch (e) {
     return null;
   }

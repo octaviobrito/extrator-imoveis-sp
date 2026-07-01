@@ -13,6 +13,14 @@ import sys
 import os
 import re
 
+# Tokens que indicam uma unidade de condomínio no COMPLEMENTO DO IMOVEL.
+# Cobre condomínios verticais (AP/BL/COB) e horizontais/vilas (CASA/CS).
+UNIDADE_RE = re.compile(
+    r'\b(AP|APT|APTO|APARTAMENTO|BL|BLC|BLOCO|CS|CASA|CONJ|CJ|COB|COBERTURA|'
+    r'LOJA|LJ|SL|SALA|SOBRELOJA|BOX|BX|GAR|GARAGEM|GALPAO|UNID|UNIDADE)\b',
+    re.IGNORECASE
+)
+
 def normalizar_logradouro(nome):
     """Remove prefixos e acentos para normalização."""
     nome = nome.upper().strip()
@@ -84,12 +92,21 @@ def main():
             complemento = (row.get('COMPLEMENTO DO IMOVEL') or '').strip()
             num_condo = (row.get('NUMERO DO CONDOMINIO') or '').strip()
 
-            # Pular registros que não são unidades de condomínio:
-            # - NUMERO DO CONDOMINIO deve ser diferente de "00-0" e "0"
-            # - COMPLEMENTO deve existir (ex: "BL 7 AP 124")
-            if not num_condo or num_condo in ('00-0', '0', '00', '000'):
-                continue
+            # Precisa ter complemento (ex: "BL 7 AP 124", "CASA 2 COND ...")
             if not complemento:
+                continue
+
+            # Manter registros que são unidades de condomínio. Um registro é
+            # unidade quando:
+            #  (a) tem NUMERO DO CONDOMINIO real (!= "00-0"), OU
+            #  (b) o COMPLEMENTO denota claramente uma unidade (CASA/AP/BL/...).
+            # A condição (b) é essencial para condomínios horizontais (vilas),
+            # cujas casas às vezes têm NUMERO DO CONDOMINIO = "00-0" mas
+            # complemento "CASA 2 COND RES ...". Sem ela, as casas ficavam de
+            # fora do índice. Registros de faixa de endereço (ex: "E 53") não
+            # casam com UNIDADE_RE e continuam excluídos.
+            condo_real = bool(num_condo) and num_condo not in ('00-0', '0', '00', '000')
+            if not (condo_real or UNIDADE_RE.search(complemento)):
                 continue
 
             numero_contribuinte = (row.get('NUMERO DO CONTRIBUINTE') or '').strip()
