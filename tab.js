@@ -1028,42 +1028,42 @@ function matchComplemento(unidades, parsed, numeroImovel) {
   const parsedApto = parsed.apartamento ? parseInt(parsed.apartamento, 10) : null;
   const parsedCasa = parsed.casa ? parseInt(parsed.casa, 10) : null;
 
-  // Filter by building number first (index 4 in array format)
-  let candidates = unidades;
-  if (numeroImovel) {
-    const filtered = unidades.filter(u => {
-      const uNum = Array.isArray(u) && u.length > 4 ? String(u[4]) : null;
-      return uNum === String(numeroImovel);
-    });
-    if (filtered.length > 0) candidates = filtered;
-  }
+  const toInt = (x) => (x != null ? parseInt(x, 10) : null);
 
-  for (const u of candidates) {
+  const unidadeCasa = (u) => {
     const c = (Array.isArray(u) ? u[0] : u.c || '').toUpperCase();
-    const blocoCSV = c.match(/\bBL\.?\s*(\w+)/)?.[1];
-    const aptoCSV = c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1];
-    const casaCSV = c.match(/\b(?:CS|CASA)\.?\s*(\w+)/)?.[1];
-
-    const csvBloco = blocoCSV ? parseInt(blocoCSV, 10) : null;
-    const csvApto = aptoCSV ? parseInt(aptoCSV, 10) : null;
-    const csvCasa = casaCSV ? parseInt(casaCSV, 10) : null;
+    const csvBloco = toInt(c.match(/\bBL\.?\s*(\w+)/)?.[1]);
+    const csvApto = toInt(c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1]);
+    const csvCasa = toInt(c.match(/\b(?:CS|CASA)\.?\s*(\w+)/)?.[1]);
 
     // Casa (condomínio horizontal / vila) — pode vir com ou sem bloco
     if (parsedCasa !== null) {
-      if (parsedBloco !== null) {
-        if (csvCasa === parsedCasa && csvBloco === parsedBloco) return u;
-      } else if (csvCasa === parsedCasa) {
-        return u;
-      }
-      continue;
+      if (parsedBloco !== null) return csvCasa === parsedCasa && csvBloco === parsedBloco;
+      return csvCasa === parsedCasa;
     }
+    if (parsedBloco !== null && parsedApto !== null) return csvBloco === parsedBloco && csvApto === parsedApto;
+    if (parsedBloco !== null) return csvBloco === parsedBloco;
+    if (parsedApto !== null) return csvApto === parsedApto;
+    return false;
+  };
 
-    if (parsedBloco !== null && parsedApto !== null) {
-      if (csvBloco === parsedBloco && csvApto === parsedApto) return u;
-    } else if (parsedBloco !== null && parsedApto === null) {
-      if (csvBloco === parsedBloco) return u;
-    } else if (parsedBloco === null && parsedApto !== null) {
-      if (csvApto === parsedApto) return u;
+  // Filter by building number (index 4 in array format)
+  const numFiltered = numeroImovel
+    ? unidades.filter(u => Array.isArray(u) && u.length > 4 && String(u[4]) === String(numeroImovel))
+    : [];
+
+  // Search order: prefer units at the searched building number. Casas em vilas
+  // costumam ser registradas sob uma porta diferente do número de entrada da
+  // vila que o usuário digita (ex: entrada 573, casas cadastradas no 655), então
+  // para casas caímos de volta para toda a setor.quadra. Para apto/bloco mantemos
+  // estrito, evitando casar unidade de mesmo número em outro prédio.
+  const sets = [];
+  if (numFiltered.length > 0) sets.push(numFiltered);
+  if (parsedCasa !== null || numFiltered.length === 0) sets.push(unidades);
+
+  for (const set of sets) {
+    for (const u of set) {
+      if (unidadeCasa(u)) return u;
     }
   }
   return null;
