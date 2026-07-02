@@ -7,3 +7,9 @@ document.getElementById('buscar').addEventListener('click', () => {
 document.getElementById('endereco').addEventListener('keypress', (e) => {
   if (e.key === 'Enter') document.getElementById('buscar').click();
 });
+
+// Exibir versão da extensão
+try {
+  const v = document.getElementById('app-version');
+  if (v) v.textContent = chrome.runtime.getManifest().version;
+} catch (e) { /* ignore */ }

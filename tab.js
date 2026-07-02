@@ -5,6 +5,12 @@ const loadingDiv = document.getElementById('loading');
 const erroDiv = document.getElementById('erro');
 const resultadosDiv = document.getElementById('resultados');
 
+// Exibir versão da extensão (para confirmar que o código novo foi carregado)
+try {
+  const versionEl = document.getElementById('app-version');
+  if (versionEl) versionEl.textContent = chrome.runtime.getManifest().version;
+} catch (e) { /* fora do contexto de extensão */ }
+
 // Event Listeners
 buscarBtn.addEventListener('click', buscarDados);
 enderecoInput.addEventListener('keypress', (e) => {
