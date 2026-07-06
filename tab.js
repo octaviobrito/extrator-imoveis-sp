@@ -813,7 +813,7 @@ async function buscarPOIsGoogle(coordenadas) {
     const r = results[i].status === 'fulfilled' ? results[i].value : null;
     const err = results[i].status === 'rejected' ? results[i].reason?.message : null;
     if (r?.erro) {
-      data[key + 'Proximo'] = `Erro: ${r.erro}`;
+      data[key + 'Proximo'] = `Erro: ${traduzirErroPlaces(r.erro)}`;
       data[key + 'Endereco'] = '-';
       data[key + 'Distancia'] = '-';
     } else if (r) {
@@ -829,6 +829,24 @@ async function buscarPOIsGoogle(coordenadas) {
     }
   });
   return data;
+}
+
+// Traduz erros comuns da Places API em orientação acionável
+function traduzirErroPlaces(msg) {
+  const m = String(msg || '');
+  if (/caller does not have permission|PERMISSION_DENIED/i.test(m)) {
+    return 'Places API (New) não habilitada no projeto da chave. No Google Cloud Console, habilite "Places API (New)" e verifique as restrições da chave.';
+  }
+  if (/API key not valid|invalid api key/i.test(m)) {
+    return 'API key inválida. Confira a chave salva na extensão.';
+  }
+  if (/billing/i.test(m)) {
+    return 'Faturamento (billing) desativado no projeto do Google Cloud. Ative o billing para usar a Places API.';
+  }
+  if (/quota|rate/i.test(m)) {
+    return 'Cota da Places API excedida. Tente novamente mais tarde.';
+  }
+  return m;
 }
 
 const SUPERMARKET_CHAINS = [
