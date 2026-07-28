@@ -269,6 +269,39 @@ function stripComplemento(endereco) {
     .trim();
 }
 
+// Tipo de via digitado -> abreviação usada no nm_logradouro_completo do
+// GeoSampa ("AV S LUIS", "R MONGUBA", "PC S LUIS DO CURU"...). Usado como
+// âncora no início do nome para não casar rua errada (ex: "SAO LUIS" casaria
+// com "R BR DE SAO LUIS", que é outra rua).
+const PREFIXO_LOGRADOURO = {
+  'RUA': 'R', 'R': 'R',
+  'AVENIDA': 'AV', 'AV': 'AV',
+  'ALAMEDA': 'AL', 'AL': 'AL',
+  'TRAVESSA': 'TV', 'TV': 'TV',
+  'PRACA': 'PC', 'PCA': 'PC', 'PC': 'PC',
+  'LARGO': 'LGO', 'LGO': 'LGO',
+  'ESTRADA': 'ESTR', 'ESTR': 'ESTR',
+  'PARQUE': 'PQ', 'PQ': 'PQ'
+};
+
+// Palavras que o cadastro oficial abrevia no nome do logradouro
+// (ex: usuário "Av. São Luis" x GeoSampa "AV S LUIS").
+const ABREV_LOGRADOURO = {
+  'SAO': 'S', 'SANTO': 'STO', 'SANTA': 'STA',
+  'DOUTOR': 'DR', 'DOUTORA': 'DRA', 'CORONEL': 'CEL',
+  'PROFESSOR': 'PROF', 'PROFESSORA': 'PROFA', 'ENGENHEIRO': 'ENG',
+  'MARECHAL': 'MAL', 'GENERAL': 'GAL', 'BRIGADEIRO': 'BRIG',
+  'SENADOR': 'SEN', 'DEPUTADO': 'DEP', 'VEREADOR': 'VER',
+  'MINISTRO': 'MIN', 'PRESIDENTE': 'PRES', 'PADRE': 'PE',
+  'MONSENHOR': 'MONS', 'CAPITAO': 'CAP', 'TENENTE': 'TEN',
+  'SARGENTO': 'SGT', 'ALMIRANTE': 'ALM', 'EMBAIXADOR': 'EMB',
+  'DESEMBARGADOR': 'DES', 'BARAO': 'BR', 'COMENDADOR': 'COM'
+};
+
+function abreviarNomeLogradouro(nome) {
+  return nome.split(' ').map(w => ABREV_LOGRADOURO[w] || w).join(' ');
+}
+
 // Títulos honoríficos que costumam divergir entre o que o usuário digita e o
 // cadastro oficial (ex: usuário "Dr. Xavier de Toledo", GeoSampa "CEL XAVIER
 // DE TOLEDO"). Usados para gerar uma variante de busca sem o título.
@@ -299,10 +332,16 @@ function extrairLogradouroNumero(endereco) {
   }
 
   const semAcento = removerAcentos(nomeRua).toUpperCase();
-  const semPrefixo = semAcento
-    .replace(/^(RUA|R\.|AVENIDA|AV\.|ALAMEDA|AL\.|TRAVESSA|TV\.|PRACA|PCA\.|LARGO|VIELA|ESTRADA|ESTR\.)\s+/i, '')
-    .replace(/\./g, '')
-    .trim();
+
+  // Captura o tipo de via ("Av.", "Rua"...) para ancorar a busca no GeoSampa
+  let prefixo = null;
+  let resto = semAcento;
+  const prefixMatch = semAcento.match(/^(RUA|R|AVENIDA|AV|ALAMEDA|AL|TRAVESSA|TV|PRACA|PCA|PC|LARGO|LGO|VIELA|ESTRADA|ESTR|PARQUE|PQ)\.?\s+/);
+  if (prefixMatch) {
+    prefixo = PREFIXO_LOGRADOURO[prefixMatch[1]] || null;
+    resto = semAcento.slice(prefixMatch[0].length);
+  }
+  const semPrefixo = resto.replace(/\./g, '').trim();
 
   const todasPalavras = semPrefixo.split(/\s+/).filter(w => w.length > 0);
   const palavrasCompletas = todasPalavras.join(' ');
@@ -317,7 +356,7 @@ function extrairLogradouroNumero(endereco) {
     ? todasPalavras.slice(-2).join(' ')
     : palavrasCompletas;
 
-  return { palavras: palavrasCompletas, palavrasSemTitulo, palavrasCurtas, numero };
+  return { palavras: palavrasCompletas, palavrasSemTitulo, palavrasCurtas, numero, prefixo };
 }
 
 // Buscar dados cadastrais via GeoSampa WFS + CEP via ViaCEP
@@ -487,28 +526,78 @@ function centroidFromGeometry(geometry) {
 }
 
 async function buscarLoteGeoSampa(endereco, coordenadas) {
-  const { palavras, palavrasSemTitulo, palavrasCurtas, numero } = extrairLogradouroNumero(endereco);
+  const { palavras, palavrasSemTitulo, palavrasCurtas, numero, prefixo } = extrairLogradouroNumero(endereco);
 
   if (palavras && numero) {
-    // Variantes de nome: como digitado e sem título honorífico
-    // (usuário "DR XAVIER DE TOLEDO" x cadastro "CEL XAVIER DE TOLEDO")
-    const variantes = [palavras];
-    if (palavrasSemTitulo && palavrasSemTitulo !== palavras) variantes.push(palavrasSemTitulo);
+    // Variantes de nome: como digitado, sem título honorífico e com as
+    // abreviações do cadastro (SAO->S, BARAO->BR, DOUTOR->DR...)
+    const nomes = [];
+    for (const n of [
+      palavras,
+      palavrasSemTitulo,
+      abreviarNomeLogradouro(palavras),
+      abreviarNomeLogradouro(palavrasSemTitulo)
+    ]) {
+      if (n && !nomes.includes(n)) nomes.push(n);
+    }
 
-    // 1. Nome (com e sem título) + número exato
-    for (const nome of variantes) {
-      const cqlFull = `nm_logradouro_completo LIKE '%${nome}%' AND cd_numero_porta='${numero}'`;
+    // Padrões em ordem de precisão:
+    //  a) ancorado no tipo de via ("AV %S LUIS") — evita casar rua errada
+    //  b) nome no fim ("% S LUIS") — exige palavra inteira
+    //  c) contém ("%S LUIS%") — último recurso
+    const patterns = [];
+    if (prefixo) for (const n of nomes) patterns.push(`${prefixo} %${n}`);
+    for (const n of nomes) patterns.push(`% ${n}`);
+    for (const n of nomes) patterns.push(`%${n}%`);
+
+    // 1. Para cada padrão (do mais preciso ao menos), tenta:
+    //    a) número exato;
+    //    b) porta composta (ex: "120 130 150") — o WAF da PRODAM bloqueia
+    //       LIKE no número, então busca só pelo nome e filtra no cliente.
+    // Ambas as tentativas rodam por padrão antes de relaxar o nome, senão um
+    // padrão menos preciso com porta exata venceria a rua certa cuja porta é
+    // composta (ex: "R BR DE SAO LUIS" 130 x "AV S LUIS" "120 130 150").
+    for (const pat of patterns) {
       try {
-        const features = await consultarWfsGeoSampa(cqlFull);
+        const features = await consultarWfsGeoSampa(
+          `nm_logradouro_completo LIKE '${pat}' AND cd_numero_porta='${numero}'`
+        );
         if (features.length > 0) {
           const dados = extrairDadosLote(features[0].properties);
           dados.centroid = centroidFromGeometry(features[0].geometry);
           return dados;
         }
       } catch (e) { /* WAF may block long queries - try next */ }
+
+      try {
+        // Scan leve (sem geometria) de até 1000 lotes da rua; ruas longas
+        // (ex: R HERVAL, 310 lotes) estouravam o limite anterior de 100.
+        const scan = await consultarWfsGeoSampaLayer(
+          'geoportal:lote_cidadao',
+          `nm_logradouro_completo LIKE '${pat}'`,
+          'cd_setor_fiscal,cd_quadra_fiscal,cd_lote,cd_numero_porta,dc_tipo_uso_imovel',
+          1000
+        );
+        const matches = scan.filter(f =>
+          String(f.properties?.cd_numero_porta || '').split(/\s+/).includes(numero)
+        );
+        if (matches.length > 0) {
+          const alvo = (matches.find(f => f.properties?.dc_tipo_uso_imovel === 'Condomínio') || matches[0]).properties;
+          // Fetch completo (com geometria) do lote escolhido, por chave exata
+          const full = await consultarWfsGeoSampa(
+            `cd_setor_fiscal='${alvo.cd_setor_fiscal}' AND cd_quadra_fiscal='${alvo.cd_quadra_fiscal}'`
+            + ` AND cd_lote='${alvo.cd_lote}' AND cd_numero_porta='${alvo.cd_numero_porta}'`, 1
+          );
+          if (full.length > 0) {
+            const dados = extrairDadosLote(full[0].properties);
+            dados.centroid = centroidFromGeometry(full[0].geometry);
+            return dados;
+          }
+        }
+      } catch (e) { /* WAF may block - try next pattern */ }
     }
 
-    // 2. If full name didn't match, try shorter (last 2 words) — only if different
+    // 2. Nome curto (últimas 2 palavras) — só se resultado único
     if (palavrasCurtas !== palavras) {
       const cqlShort = `nm_logradouro_completo LIKE '%${palavrasCurtas}%' AND cd_numero_porta='${numero}'`;
       try {
@@ -519,25 +608,6 @@ async function buscarLoteGeoSampa(endereco, coordenadas) {
           return dados;
         }
         // Multiple results with short name — ambiguous, skip
-      } catch (e) { /* WAF may block - try next */ }
-    }
-
-    // 3. Porta composta (ex: "131 137 141"): o WAF da PRODAM bloqueia LIKE no
-    // número, então busca só pelo nome e filtra a porta no cliente.
-    for (const nome of variantes) {
-      try {
-        const features = await consultarWfsGeoSampa(
-          `nm_logradouro_completo LIKE '%${nome}%'`, 100
-        );
-        const matches = features.filter(f =>
-          String(f.properties?.cd_numero_porta || '').split(/\s+/).includes(numero)
-        );
-        if (matches.length > 0) {
-          const escolhido = matches.find(f => f.properties?.dc_tipo_uso_imovel === 'Condomínio') || matches[0];
-          const dados = extrairDadosLote(escolhido.properties);
-          dados.centroid = centroidFromGeometry(escolhido.geometry);
-          return dados;
-        }
       } catch (e) { /* WAF may block - fall through to spatial */ }
     }
   }
