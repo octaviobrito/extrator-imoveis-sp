@@ -238,18 +238,22 @@ function parseComplemento(endereco) {
   const blocoRe = /\b(?:bl\.?o?c?o?|blc\.?|bl\.?)\s*(\d+)/i;
   const aptoRe = /\b(?:a(?:p(?:t(?:o|\.)?|\.)?|partamento)\.?)\s*(\d+)/i;
   const casaRe = /\b(?:casa|cs)\.?\s*(\d+)/i;
+  const salaRe = /\b(?:sala|sl|conjunto|conj|cj)\.?\s*(\d+)/i;
   const blocoMatch = endereco.match(blocoRe);
   const aptoMatch = endereco.match(aptoRe);
   const casaMatch = endereco.match(casaRe);
-  if (!blocoMatch && !aptoMatch && !casaMatch) return null;
+  const salaMatch = endereco.match(salaRe);
+  if (!blocoMatch && !aptoMatch && !casaMatch && !salaMatch) return null;
   return {
     bloco: blocoMatch ? blocoMatch[1] : null,
     apartamento: aptoMatch ? aptoMatch[1] : null,
     casa: casaMatch ? casaMatch[1] : null,
+    sala: salaMatch ? salaMatch[1] : null,
     texto: [
       blocoMatch ? `Bloco ${blocoMatch[1]}` : '',
       aptoMatch ? `Apto ${aptoMatch[1]}` : '',
-      casaMatch ? `Casa ${casaMatch[1]}` : ''
+      casaMatch ? `Casa ${casaMatch[1]}` : '',
+      salaMatch ? `Sala ${salaMatch[1]}` : ''
     ].filter(Boolean).join(', ')
   };
 }
@@ -259,10 +263,24 @@ function stripComplemento(endereco) {
     .replace(/,?\s*\b(?:bl\.?o?c?o?|blc\.?|bl\.?)\s*\d+/i, '')
     .replace(/,?\s*\b(?:a(?:p(?:t(?:o|\.)?|\.)?|partamento)\.?)\s*\d+/i, '')
     .replace(/,?\s*\b(?:casa|cs)\.?\s*\d+/i, '')
+    .replace(/,?\s*\b(?:sala|sl|conjunto|conj|cj)\.?\s*\d+/i, '')
     .replace(/,\s*,/g, ',')
     .replace(/,\s*$/, '')
     .trim();
 }
+
+// Títulos honoríficos que costumam divergir entre o que o usuário digita e o
+// cadastro oficial (ex: usuário "Dr. Xavier de Toledo", GeoSampa "CEL XAVIER
+// DE TOLEDO"). Usados para gerar uma variante de busca sem o título.
+const TITULOS_LOGRADOURO = new Set([
+  'DR', 'DRA', 'DOUTOR', 'DOUTORA', 'CEL', 'CORONEL', 'PROF', 'PROFA',
+  'PROFESSOR', 'PROFESSORA', 'ENG', 'ENGENHEIRO', 'MAL', 'MARECHAL',
+  'GAL', 'GENERAL', 'BRIG', 'BRIGADEIRO', 'SEN', 'SENADOR', 'DEP',
+  'DEPUTADO', 'VER', 'VEREADOR', 'MIN', 'MINISTRO', 'PRES', 'PRESIDENTE',
+  'PE', 'PADRE', 'FREI', 'DOM', 'MADRE', 'CAP', 'CAPITAO', 'TEN',
+  'TENENTE', 'SGT', 'SARGENTO', 'ALM', 'ALMIRANTE', 'EMB', 'EMBAIXADOR',
+  'DES', 'DESEMBARGADOR', 'BARAO', 'VISCONDE', 'CONDE', 'MARQUES', 'DUQUE'
+]);
 
 function extrairLogradouroNumero(endereco) {
   const limpo = stripComplemento(endereco);
@@ -283,15 +301,23 @@ function extrairLogradouroNumero(endereco) {
   const semAcento = removerAcentos(nomeRua).toUpperCase();
   const semPrefixo = semAcento
     .replace(/^(RUA|R\.|AVENIDA|AV\.|ALAMEDA|AL\.|TRAVESSA|TV\.|PRACA|PCA\.|LARGO|VIELA|ESTRADA|ESTR\.)\s+/i, '')
+    .replace(/\./g, '')
     .trim();
 
   const todasPalavras = semPrefixo.split(/\s+/).filter(w => w.length > 0);
   const palavrasCompletas = todasPalavras.join(' ');
+
+  // Variante sem título honorífico no início ("DR XAVIER DE TOLEDO" -> "XAVIER DE TOLEDO")
+  let palavrasSemTitulo = palavrasCompletas;
+  if (todasPalavras.length > 1 && TITULOS_LOGRADOURO.has(todasPalavras[0])) {
+    palavrasSemTitulo = todasPalavras.slice(1).join(' ');
+  }
+
   const palavrasCurtas = todasPalavras.length > 2
     ? todasPalavras.slice(-2).join(' ')
     : palavrasCompletas;
 
-  return { palavras: palavrasCompletas, palavrasCurtas, numero };
+  return { palavras: palavrasCompletas, palavrasSemTitulo, palavrasCurtas, numero };
 }
 
 // Buscar dados cadastrais via GeoSampa WFS + CEP via ViaCEP
@@ -362,10 +388,10 @@ function latLonToUTM23S(lat, lon) {
 }
 
 // WFS request to GeoSampa lote_cidadao layer
-async function consultarWfsGeoSampa(cqlFilter) {
+async function consultarWfsGeoSampa(cqlFilter, count = 5) {
   const wfsUrl = `http://wfs.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/ows`
     + `?service=WFS&version=2.0.0&request=GetFeature`
-    + `&typeName=geoportal:lote_cidadao&count=5`
+    + `&typeName=geoportal:lote_cidadao&count=${count}`
     + `&outputFormat=application/json&srsName=EPSG:4326`
     + `&CQL_FILTER=${encodeURIComponent(cqlFilter)}`;
 
@@ -461,42 +487,59 @@ function centroidFromGeometry(geometry) {
 }
 
 async function buscarLoteGeoSampa(endereco, coordenadas) {
-  const { palavras, palavrasCurtas, numero } = extrairLogradouroNumero(endereco);
+  const { palavras, palavrasSemTitulo, palavrasCurtas, numero } = extrairLogradouroNumero(endereco);
 
   if (palavras && numero) {
-    // 1. Try full street name (most specific)
-    const cqlFull = `nm_logradouro_completo LIKE '%${palavras}%' AND cd_numero_porta='${numero}'`;
-    try {
-      const features = await consultarWfsGeoSampa(cqlFull);
-      if (features.length > 0) {
-        const dados = extrairDadosLote(features[0].properties);
-        dados.centroid = centroidFromGeometry(features[0].geometry);
-        return dados;
-      }
-    } catch (e) { /* WAF may block long queries - try shorter */ }
+    // Variantes de nome: como digitado e sem título honorífico
+    // (usuário "DR XAVIER DE TOLEDO" x cadastro "CEL XAVIER DE TOLEDO")
+    const variantes = [palavras];
+    if (palavrasSemTitulo && palavrasSemTitulo !== palavras) variantes.push(palavrasSemTitulo);
+
+    // 1. Nome (com e sem título) + número exato
+    for (const nome of variantes) {
+      const cqlFull = `nm_logradouro_completo LIKE '%${nome}%' AND cd_numero_porta='${numero}'`;
+      try {
+        const features = await consultarWfsGeoSampa(cqlFull);
+        if (features.length > 0) {
+          const dados = extrairDadosLote(features[0].properties);
+          dados.centroid = centroidFromGeometry(features[0].geometry);
+          return dados;
+        }
+      } catch (e) { /* WAF may block long queries - try next */ }
+    }
 
     // 2. If full name didn't match, try shorter (last 2 words) — only if different
     if (palavrasCurtas !== palavras) {
       const cqlShort = `nm_logradouro_completo LIKE '%${palavrasCurtas}%' AND cd_numero_porta='${numero}'`;
-      const featuresShort = await consultarWfsGeoSampa(cqlShort);
-      if (featuresShort.length === 1) {
-        const dados = extrairDadosLote(featuresShort[0].properties);
-        dados.centroid = centroidFromGeometry(featuresShort[0].geometry);
-        return dados;
-      }
-      // Multiple results with short name — ambiguous, skip to spatial
+      try {
+        const featuresShort = await consultarWfsGeoSampa(cqlShort);
+        if (featuresShort.length === 1) {
+          const dados = extrairDadosLote(featuresShort[0].properties);
+          dados.centroid = centroidFromGeometry(featuresShort[0].geometry);
+          return dados;
+        }
+        // Multiple results with short name — ambiguous, skip
+      } catch (e) { /* WAF may block - try next */ }
     }
 
-    // 3. Condo fallback (cd_numero_porta may be '0 2100 S/N')
-    const cqlCondo = `nm_logradouro_completo LIKE '%${palavras}%' AND cd_numero_porta LIKE '%${numero}%' AND dc_tipo_uso_imovel='Condomínio'`;
-    try {
-      const condoFeatures = await consultarWfsGeoSampa(cqlCondo);
-      if (condoFeatures.length > 0) {
-        const dados = extrairDadosLote(condoFeatures[0].properties);
-        dados.centroid = centroidFromGeometry(condoFeatures[0].geometry);
-        return dados;
-      }
-    } catch (e) { /* WAF may block - fall through to spatial */ }
+    // 3. Porta composta (ex: "131 137 141"): o WAF da PRODAM bloqueia LIKE no
+    // número, então busca só pelo nome e filtra a porta no cliente.
+    for (const nome of variantes) {
+      try {
+        const features = await consultarWfsGeoSampa(
+          `nm_logradouro_completo LIKE '%${nome}%'`, 100
+        );
+        const matches = features.filter(f =>
+          String(f.properties?.cd_numero_porta || '').split(/\s+/).includes(numero)
+        );
+        if (matches.length > 0) {
+          const escolhido = matches.find(f => f.properties?.dc_tipo_uso_imovel === 'Condomínio') || matches[0];
+          const dados = extrairDadosLote(escolhido.properties);
+          dados.centroid = centroidFromGeometry(escolhido.geometry);
+          return dados;
+        }
+      } catch (e) { /* WAF may block - fall through to spatial */ }
+    }
   }
 
   if (coordenadas) {
@@ -1069,6 +1112,7 @@ function matchComplemento(unidades, parsed, numeroImovel) {
   const parsedBloco = parsed.bloco ? parseInt(parsed.bloco, 10) : null;
   const parsedApto = parsed.apartamento ? parseInt(parsed.apartamento, 10) : null;
   const parsedCasa = parsed.casa ? parseInt(parsed.casa, 10) : null;
+  const parsedSala = parsed.sala ? parseInt(parsed.sala, 10) : null;
 
   const toInt = (x) => (x != null ? parseInt(x, 10) : null);
 
@@ -1077,7 +1121,14 @@ function matchComplemento(unidades, parsed, numeroImovel) {
     const csvBloco = toInt(c.match(/\bBL\.?\s*(\w+)/)?.[1]);
     const csvApto = toInt(c.match(/\bAP(?:T(?:O)?)?\.?\s*(\w+)/)?.[1]);
     const csvCasa = toInt(c.match(/\b(?:CS|CASA)\.?\s*(\w+)/)?.[1]);
+    // Sala/conjunto comercial: IPTU usa SL, SALA, CJ ou CONJ indistintamente
+    const csvSala = toInt(c.match(/\b(?:SL|SALA|CJ|CONJ(?:UNTO)?)\.?\s*(\w+)/)?.[1]);
 
+    // Sala/conjunto (prédio comercial) — pode vir com ou sem bloco
+    if (parsedSala !== null) {
+      if (parsedBloco !== null) return csvSala === parsedSala && csvBloco === parsedBloco;
+      return csvSala === parsedSala;
+    }
     // Casa (condomínio horizontal / vila) — pode vir com ou sem bloco
     if (parsedCasa !== null) {
       if (parsedBloco !== null) return csvCasa === parsedCasa && csvBloco === parsedBloco;
@@ -1095,13 +1146,13 @@ function matchComplemento(unidades, parsed, numeroImovel) {
     : [];
 
   // Search order: prefer units at the searched building number. Casas em vilas
-  // costumam ser registradas sob uma porta diferente do número de entrada da
-  // vila que o usuário digita (ex: entrada 573, casas cadastradas no 655), então
-  // para casas caímos de volta para toda a setor.quadra. Para apto/bloco mantemos
-  // estrito, evitando casar unidade de mesmo número em outro prédio.
+  // e salas em prédios com porta composta (ex: "131 137 141") costumam ser
+  // registradas sob número diferente do que o usuário digita, então para
+  // casa/sala caímos de volta para toda a setor.quadra. Para apto/bloco
+  // mantemos estrito, evitando casar unidade de mesmo número em outro prédio.
   const sets = [];
   if (numFiltered.length > 0) sets.push(numFiltered);
-  if (parsedCasa !== null || numFiltered.length === 0) sets.push(unidades);
+  if (parsedCasa !== null || parsedSala !== null || numFiltered.length === 0) sets.push(unidades);
 
   for (const set of sets) {
     for (const u of set) {
