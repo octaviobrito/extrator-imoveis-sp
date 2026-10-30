@@ -3,14 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Extrator de Imóveis SP</title>
+  <title>Extrator de Imóveis</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="container">
-    <h1>Extrator de Imóveis SP</h1>
+    <h1>Extrator de Imóveis</h1>
 
     <div class="input-section">
+      <label for="cidade">Cidade:</label>
+      <select id="cidade" class="select-cidade">
+        <option value="sao-paulo">São Paulo/SP</option>
+        <option value="curitiba">Curitiba/PR</option>
+      </select>
       <label for="endereco">Endereço Completo:</label>
       <input
         type="text"
@@ -18,7 +23,7 @@
         placeholder="Ex: Avenida Paulista, 1578 ou Rua X, 100, bloco 2, apto 301"
         autocomplete="off"
       >
-      <small>Digite a rua e número em São Paulo/SP</small>
+      <small id="endereco-dica">Digite a rua e número em São Paulo/SP</small>
       <button id="buscar">Buscar Dados</button>
     </div>
 
@@ -50,9 +55,9 @@
           <p><strong>Endereço Completo:</strong> <span id="endereco-completo">-</span></p>
           <p><strong>CEP:</strong> <span id="cep">-</span></p>
           <p><strong>Bairro:</strong> <span id="bairro">-</span></p>
-          <p><strong>Distrito:</strong> <span id="distrito">-</span></p>
-          <p><strong>Subprefeitura:</strong> <span id="subprefeitura">-</span></p>
-          <p><strong>SQL (Setor/Quadra/Lote):</strong> <span id="sql">-</span></p>
+          <p><strong id="lbl-distrito">Distrito:</strong> <span id="distrito">-</span></p>
+          <p><strong id="lbl-subprefeitura">Subprefeitura:</strong> <span id="subprefeitura">-</span></p>
+          <p><strong id="lbl-sql">SQL (Setor/Quadra/Lote):</strong> <span id="sql">-</span></p>
           <div id="condo-notice" class="condo-notice" style="display:none;"></div>
           <a id="condo-iptu-link" href="#" target="_blank" style="display:none;" class="condo-link">Consultar unidade no portal IPTU</a>
           <p><strong>Proprietário:</strong> <span id="proprietario">-</span></p>
@@ -83,15 +88,15 @@
         <h2>Zoneamento</h2>
         <div id="dados-zoneamento">
           <p><strong>Zona:</strong> <span id="zona">-</span></p>
-          <p><strong>Coeficiente de Aproveitamento:</strong> <span id="coef-aprov">-</span></p>
-          <p><strong>Gabarito de Altura:</strong> <span id="gabarito">-</span></p>
+          <p><strong id="lbl-coef">Coeficiente de Aproveitamento:</strong> <span id="coef-aprov">-</span></p>
+          <p><strong id="lbl-gabarito">Gabarito de Altura:</strong> <span id="gabarito">-</span></p>
         </div>
       </div>
 
       <div class="card">
         <h2>Mercado Imobiliário</h2>
         <div id="dados-mercado">
-          <p><strong>Valor Estimado (m²):</strong> <span id="valor-m2">-</span></p>
+          <p><strong id="lbl-valor-m2">Valor Estimado (m²):</strong> <span id="valor-m2">-</span></p>
           <p><strong>Imóveis à Venda (região):</strong> <span id="imoveis-venda">-</span></p>
           <p><strong>Preço Médio (região):</strong> <span id="preco-medio">-</span></p>
         </div>
@@ -100,9 +105,9 @@
       <div class="card">
         <h2>Infraestrutura e Transporte</h2>
         <div id="dados-infraestrutura">
-          <p><strong>Metrô mais próximo:</strong> <span id="metro-proximo">-</span></p>
+          <p><strong id="lbl-metro">Metrô mais próximo:</strong> <span id="metro-proximo">-</span></p>
           <p><strong>Distância:</strong> <span id="metro-distancia">-</span></p>
-          <p><strong>Trem (CPTM) mais próximo:</strong> <span id="trem-proximo">-</span></p>
+          <p><strong id="lbl-trem">Trem (CPTM) mais próximo:</strong> <span id="trem-proximo">-</span></p>
           <p><strong>Distância:</strong> <span id="trem-distancia">-</span></p>
         </div>
       </div>
@@ -130,6 +135,7 @@
     </div>
   </div>
 
+  <script src="curitiba.js"></script>
   <script src="tab.js"></script>
 </body>
 </html>

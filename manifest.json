@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Extrator de Dados de Imóveis SP",
-  "description": "Extraia dados completos de imóveis em São Paulo inserindo apenas o endereço",
-  "version": "2.2",
+  "name": "Extrator de Dados de Imóveis (SP e Curitiba)",
+  "description": "Extraia dados completos de imóveis em São Paulo e Curitiba inserindo apenas o endereço",
+  "version": "2.3",
   "permissions": [
     "activeTab",
     "storage",

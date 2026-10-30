@@ -18,7 +18,11 @@
       width: 100%; padding: 10px; border: 2px solid #e2e8f0;
       border-radius: 6px; font-size: 14px; margin-bottom: 4px;
     }
-    input:focus { outline: none; border-color: #4299e1; }
+    input:focus, select:focus { outline: none; border-color: #4299e1; }
+    select {
+      width: 100%; padding: 9px; border: 2px solid #e2e8f0; border-radius: 6px;
+      font-size: 14px; margin-bottom: 12px; background: white; color: #2d3748;
+    }
     small { display: block; color: #718096; margin-bottom: 12px; font-size: 12px; }
     button {
       width: 100%; padding: 10px; background: #4299e1; color: white;
@@ -28,10 +32,15 @@
   </style>
 </head>
 <body>
-  <h1>Extrator de Imóveis SP</h1>
+  <h1>Extrator de Imóveis</h1>
+  <label for="cidade">Cidade:</label>
+  <select id="cidade">
+    <option value="sao-paulo">São Paulo/SP</option>
+    <option value="curitiba">Curitiba/PR</option>
+  </select>
   <label for="endereco">Endereço Completo:</label>
   <input type="text" id="endereco" placeholder="Ex: Avenida Paulista, 1578" autocomplete="off">
-  <small>Digite a rua e número em São Paulo/SP</small>
+  <small>Digite a rua e número</small>
   <button id="buscar">Buscar Dados</button>
   <small style="text-align:center; margin-top:12px; margin-bottom:0;">Versão <span id="app-version">-</span></small>
   <script src="popup.js"></script>

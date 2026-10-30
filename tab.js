@@ -11,6 +11,57 @@ try {
   if (versionEl) versionEl.textContent = chrome.runtime.getManifest().version;
 } catch (e) { /* fora do contexto de extensão */ }
 
+// Seletor de cidade (lembra a última escolha; aceita ?cidade= vindo do popup)
+const cidadeSelect = document.getElementById('cidade');
+const ROTULOS = {
+  'sao-paulo': {
+    'lbl-distrito': 'Distrito:',
+    'lbl-subprefeitura': 'Subprefeitura:',
+    'lbl-sql': 'SQL (Setor/Quadra/Lote):',
+    'lbl-coef': 'Coeficiente de Aproveitamento:',
+    'lbl-gabarito': 'Gabarito de Altura:',
+    'lbl-valor-m2': 'Valor Estimado (m²):',
+    'lbl-metro': 'Metrô mais próximo:',
+    'lbl-trem': 'Trem (CPTM) mais próximo:',
+    'endereco-dica': 'Digite a rua e número em São Paulo/SP'
+  },
+  'curitiba': {
+    'lbl-distrito': 'Inscrição Imobiliária:',
+    'lbl-subprefeitura': 'Regional:',
+    'lbl-sql': 'Indicação Fiscal:',
+    'lbl-coef': 'Setor / Abrangência:',
+    'lbl-gabarito': 'Legislação:',
+    'lbl-valor-m2': 'Valor do Terreno (m²):',
+    'lbl-metro': 'Terminal de ônibus mais próximo:',
+    'lbl-trem': 'Estação-tubo mais próxima:',
+    'endereco-dica': 'Digite a rua e número em Curitiba/PR'
+  }
+};
+
+function atualizarCidade() {
+  const rotulos = ROTULOS[cidadeSelect.value] || ROTULOS['sao-paulo'];
+  for (const [id, texto] of Object.entries(rotulos)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = texto;
+  }
+  document.getElementById('import-section').style.display =
+    cidadeSelect.value === 'curitiba' ? 'none' : '';
+  try { localStorage.setItem('cidade', cidadeSelect.value); } catch (e) {}
+}
+
+{
+  const inicial = new URLSearchParams(window.location.search).get('cidade');
+  let salva = null;
+  try { salva = localStorage.getItem('cidade'); } catch (e) {}
+  const escolha = inicial || salva;
+  if (escolha && ROTULOS[escolha]) cidadeSelect.value = escolha;
+  atualizarCidade();
+  cidadeSelect.addEventListener('change', () => {
+    atualizarCidade();
+    resultadosDiv.classList.add('hidden');
+  });
+}
+
 // Event Listeners
 buscarBtn.addEventListener('click', buscarDados);
 enderecoInput.addEventListener('keypress', (e) => {
@@ -86,14 +137,6 @@ btnSaveApikey.addEventListener('click', async () => {
   }
 })();
 
-// Auto-search if address passed via URL parameter
-const params = new URLSearchParams(window.location.search);
-const enderecoParam = params.get('endereco');
-if (enderecoParam) {
-  enderecoInput.value = enderecoParam;
-  buscarDados();
-}
-
 // Função principal de busca
 async function buscarDados() {
   const endereco = enderecoInput.value.trim();
@@ -105,6 +148,22 @@ async function buscarDados() {
 
   mostrarLoading();
   limparResultados();
+
+  // Endereço que cita Curitiba vai para Curitiba mesmo com o seletor em SP
+  if (ehCuritiba(endereco) && cidadeSelect.value !== 'curitiba') {
+    cidadeSelect.value = 'curitiba';
+    atualizarCidade();
+  }
+
+  if (cidadeSelect.value === 'curitiba') {
+    try {
+      exibirResultados(await buscarDadosCuritiba(endereco));
+    } catch (erro) {
+      mostrarErro(erro.message);
+    }
+    esconderLoading();
+    return;
+  }
 
   try {
     // Strip bloco/apartamento complement for geocoding and lookup
@@ -1394,16 +1453,33 @@ function exibirResultados(dados) {
 
   if (unidade) {
     sqlEl.textContent = unidade.sql;
-  } else if (dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
+  } else if (dados.cidade !== 'curitiba' && dados.geoSampa?.isCondominio && dados.geoSampa?.complemento) {
     sqlEl.textContent = `${sqlText} (SQL do condomínio)`;
   } else {
     sqlEl.textContent = sqlText;
   }
 
+  const curitiba = dados.cidade === 'curitiba';
+  if (curitiba && dados.geoSampa?.aproximado && sqlText !== '-') {
+    sqlEl.textContent = `${sqlText} (lote localizado pelo mapa, nº ${dados.geoSampa.numeroLote || '?'} — confira)`;
+  }
+
   // Condo notice
   const condoNotice = document.getElementById('condo-notice');
   const condoLink = document.getElementById('condo-iptu-link');
-  if (condoNotice) {
+  if (condoNotice && curitiba) {
+    if (condoLink) condoLink.style.display = 'none';
+    if (dados.geoSampa?.isCondominio) {
+      const compl = dados.geoSampa.complemento;
+      condoNotice.textContent =
+        `${dados.geoSampa.especie}: a Prefeitura de Curitiba publica apenas o lote, então a Indicação Fiscal acima é do terreno`
+        + (compl ? `. A da unidade (${compl.texto}) consta no carnê do IPTU ou na Consulta Informativa de Lote.` : '.');
+      condoNotice.className = 'condo-notice';
+      condoNotice.style.display = 'block';
+    } else {
+      condoNotice.style.display = 'none';
+    }
+  } else if (condoNotice) {
     if (unidade) {
       condoNotice.innerHTML = `Unidade encontrada: <strong>${unidade.complemento}</strong> (${unidade.totalUnidades} unidades no condomínio)`;
       condoNotice.style.display = 'block';
@@ -1464,7 +1540,8 @@ function exibirResultados(dados) {
       if (!val) return;
       const sql = dados.geoSampa?.sql;
       if (sql && sql !== '-') {
-        await salvarMatriculaCache(`matricula_${sql}`, val, mat?.numCartorio || '');
+        const chave = curitiba ? `matricula_cwb_${sql}` : `matricula_${sql}`;
+        await salvarMatriculaCache(chave, val, mat?.numCartorio || '');
         matriculaSpan.textContent = `${val} (salvo manualmente)`;
         inputRow.style.display = 'none';
         matriculaLink.style.display = 'none';
@@ -1481,7 +1558,7 @@ function exibirResultados(dados) {
   const valorVenalLink = document.getElementById('valor-venal-link');
   if (valorVenalLink) {
     const sql = dados.geoSampa?.sql;
-    if (sql && sql !== '-') {
+    if (sql && sql !== '-' && !curitiba) {
       valorVenalLink.href = 'https://iptu.prefeitura.sp.gov.br/';
       valorVenalLink.style.display = 'inline';
     } else {
@@ -1532,4 +1609,14 @@ function mostrarErro(mensagem) {
 
 function limparResultados() {
   resultadosDiv.classList.add('hidden');
+}
+
+// Auto-search if address passed via URL parameter. Must stay at the end of the
+// file: the search uses top-level consts declared above.
+{
+  const enderecoParam = new URLSearchParams(window.location.search).get('endereco');
+  if (enderecoParam) {
+    enderecoInput.value = enderecoParam;
+    buscarDados();
+  }
 }
