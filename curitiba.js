@@ -90,7 +90,75 @@ async function buscarLoteCuritiba(enderecoBase) {
       }
     } catch (e) { /* tenta o próximo padrão */ }
   }
+
+  // Número ausente do cadastro: estima pelo próprio lado da rua
+  for (const pat of patterns) {
+    try {
+      const lotes = await consultarArcGIS(CWB_LOTE, {
+        where: `gtm_nm_logradouro LIKE '${pat}'`,
+        returnGeometry: 'true',
+        outSR: '4326'
+      });
+      if (lotes.length > 0) return await estimarLotePorNumero(lotes, parseInt(numero, 10));
+    } catch (e) { /* tenta o próximo padrão */ }
+  }
   return null;
+}
+
+// Com o nº pedido fora do cadastro, usa o lote do mesmo lado (par/ímpar) com
+// número mais próximo. Se o nº fica antes do primeiro ou depois do último
+// desse lado, o imóvel costuma ser o lote de esquina vizinho, cadastrado pela
+// rua transversal (ex: Sabina Lupinski nº 13 = esquina "Francisco das Chagas
+// Lopes, 729", vizinha do nº 47).
+async function estimarLotePorNumero(lotes, n) {
+  const comNum = lotes
+    .map(f => ({ f, num: parseInt(f.attributes.gtm_num_predial, 10), c: centroidArcGIS(f.geometry) }))
+    .filter(x => !isNaN(x.num) && x.c);
+  if (comNum.length === 0 || isNaN(n)) return null;
+  const lado = comNum.filter(x => x.num % 2 === n % 2);
+  const base = (lado.length ? lado : comNum).sort((a, b) => Math.abs(a.num - n) - Math.abs(b.num - n));
+  const nearest = base[0];
+  const nums = base.map(x => x.num);
+  const foraDaFaixa = n < Math.min(...nums) || n > Math.max(...nums);
+
+  if (foraDaFaixa && base.length > 1) {
+    // Direção de avanço da numeração, do 2º mais próximo para o mais próximo
+    const second = base[1];
+    const dir = { x: nearest.c.lon - second.c.lon, y: nearest.c.lat - second.c.lat };
+    const pad = 0.0002; // ~20 m
+    const xs = nearest.f.geometry.rings[0].map(p => p[0]);
+    const ys = nearest.f.geometry.rings[0].map(p => p[1]);
+    try {
+      const vizinhos = await consultarArcGIS(CWB_LOTE, {
+        geometry: `${Math.min(...xs) - pad},${Math.min(...ys) - pad},${Math.max(...xs) + pad},${Math.max(...ys) + pad}`,
+        geometryType: 'esriGeometryEnvelope',
+        inSR: '4326',
+        spatialRel: 'esriSpatialRelIntersects',
+        returnGeometry: 'true',
+        outSR: '4326'
+      });
+      const quadra = String(nearest.f.attributes.gtm_ind_fiscal || '').slice(0, 5);
+      const esquinas = vizinhos
+        .filter(v => /esquina/i.test(v.attributes.geo_desc_posicao_quadra || '')
+          && String(v.attributes.gtm_ind_fiscal || '').slice(0, 5) === quadra
+          && v.attributes.gtm_nm_logradouro !== nearest.f.attributes.gtm_nm_logradouro)
+        .map(v => {
+          const c = centroidArcGIS(v.geometry);
+          return {
+            v, c,
+            score: c ? (c.lon - nearest.c.lon) * dir.x + (c.lat - nearest.c.lat) * dir.y : -Infinity,
+            dist: c ? Math.hypot(c.lon - nearest.c.lon, c.lat - nearest.c.lat) : Infinity
+          };
+        })
+        // à frente na direção da numeração, e a mais próxima do último lote
+        .filter(e => e.score > 0)
+        .sort((a, b) => a.dist - b.dist);
+      if (esquinas.length > 0) {
+        return { attrs: esquinas[0].v.attributes, centroid: esquinas[0].c, aproximado: true, motivo: 'esquina' };
+      }
+    } catch (e) { /* usa o vizinho mais próximo */ }
+  }
+  return { attrs: nearest.f.attributes, centroid: nearest.c, aproximado: true, motivo: 'vizinho' };
 }
 
 // Fallback: lote que contém (ou está a até 30 m de) o ponto geocodificado
@@ -101,7 +169,7 @@ async function buscarLoteCuritibaPorPonto(coord) {
     });
     if (features.length > 0) {
       const f = escolherLote(features);
-      return { attrs: f.attributes, centroid: centroidArcGIS(f.geometry), aproximado: true };
+      return { attrs: f.attributes, centroid: centroidArcGIS(f.geometry), aproximado: true, motivo: 'mapa' };
     }
   }
   return null;
@@ -302,6 +370,8 @@ async function buscarDadosCuritiba(endereco) {
     geoSampa: {
       sql: indicacaoFiscal,
       aproximado: !!lote?.aproximado,
+      motivo: lote?.motivo || null,
+      numeroPedido: numero || null,
       numeroLote: a.gtm_num_predial || null,
       cep: cepData?.cep || '-',
       bairro: bairroLote || cepData?.bairro || '-',

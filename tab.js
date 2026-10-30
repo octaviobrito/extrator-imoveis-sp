@@ -1461,7 +1461,13 @@ function exibirResultados(dados) {
 
   const curitiba = dados.cidade === 'curitiba';
   if (curitiba && dados.geoSampa?.aproximado && sqlText !== '-') {
-    sqlEl.textContent = `${sqlText} (lote localizado pelo mapa, nº ${dados.geoSampa.numeroLote || '?'} — confira)`;
+    const g = dados.geoSampa;
+    const pedido = g.numeroPedido ? `nº ${g.numeroPedido} não consta no cadastro desta rua` : 'número não consta no cadastro';
+    const nota = {
+      esquina: `${pedido}; provável lote de esquina, cadastrado pela rua transversal — confira`,
+      vizinho: `${pedido}; mostrando o lote de número mais próximo (nº ${g.numeroLote || '?'}) — confira`
+    }[g.motivo] || `lote localizado pelo mapa, nº ${g.numeroLote || '?'} — confira`;
+    sqlEl.textContent = `${sqlText} (${nota})`;
   }
 
   // Condo notice
